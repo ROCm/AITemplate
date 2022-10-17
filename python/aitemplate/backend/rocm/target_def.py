@@ -93,7 +93,6 @@ class ROCM(Target):
         ck_paths = [
             os.path.join(self._template_path),
             os.path.join(self._template_path, "include/"),
-            os.path.join(self._template_path, "include/ck/utility"),
             os.path.join(self._template_path, "external/include/half/"),
             os.path.join(self._template_path, "library/include/"),
             os.path.join(self._template_path, "profiler/include/"),
