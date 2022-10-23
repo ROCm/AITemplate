@@ -35,10 +35,12 @@ def run(token, width, height, prompt, benchmark):
         use_auth_token=token,
     ).to("cuda")
 
+    prompts = [prompt] * batch_size
+
     with torch.autocast("cuda"):
         image = pipe(prompt, height, width).images[0]
         if benchmark:
-            t = benchmark_torch_function(10, pipe, prompt)
+            t = benchmark_torch_function(10, pipe, prompts)
             print(f"sd e2e: {t} ms")
 
     image.save("example_ait.png")
