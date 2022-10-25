@@ -94,7 +94,8 @@ FUNC_DECL = jinja2.Template(
 
 FUNC_CALL_TEMPLATE = jinja2.Template(
     """
-{{indent}}int64_t num_elements = 1;
+{{indent}}{%if first_call %}int64_t{% endif %} num_elements = 1;
+
 {% for dim_name in dim_names %}
 {{indent}}num_elements *= {{dim_name}};
 {% endfor %}
@@ -135,8 +136,14 @@ FUNC_CALL_FP16_PARAM_TEMPLATE = jinja2.Template(
         {% if is_cuda %}&({% endif %}{{name}}{% if is_cuda %}->raw()){% endif %})"""
 )
 
+gen_func_times = 0
+
 
 def gen_function_call(func_attrs: Dict[str, Any], indent="  ", is_cuda=False) -> str:
+
+    global gen_func_times
+    gen_func_times += 1
+
     assert len(func_attrs["outputs"]) == 1
     assert len(func_attrs["inputs"]) == 1
 
@@ -149,6 +156,7 @@ def gen_function_call(func_attrs: Dict[str, Any], indent="  ", is_cuda=False) ->
 
     dim_names = [dim._attrs["name"] for dim in func_attrs["inputs"][0].shape()]
     return FUNC_CALL_TEMPLATE.render(
+        first_call=(gen_func_times==1),
         func_name=func_attrs["name"],
         output=output_name,
         input=input_name,
@@ -226,22 +234,43 @@ def create_ait_model(shapes):
         is_input=True,
     )
     Y = add_one()(X)
-    Y._attrs["is_output"] = True
+    #print(X)
+    #Y._attrs["is_output"] = True
     Y._attrs["name"] = "Y"
-    return Y
+    #print(Y)
+    Y1 = add_one()(Y)
+
+    Y1._attrs["name"] = "Y1"
+    Y0 = add_one()(Y1)
+    Y0._attrs["is_output"] = True
+    Y0._attrs["name"] = "Y0"
+    #print(Y0)
+    return Y0
 
 
 def verify_add_one():
     shapes = [16, 512]
     x = torch.randn(shapes).cuda().half()
     y_pt = x + 1.0
+    y_pt = y_pt + 1.0
+    y_pt = y_pt + 1.0
 
     Y = create_ait_model([16, 512])
     target = detect_target()
+    print(Y.src_ops())
+
+    for src_op in Y.src_ops():
+        #print(src_op._attrs["inputs"])
+        a=list(enumerate(src_op._attrs["inputs"]))
+        for ele in a:
+            print(ele[1]._attrs["depth"])
+
+    print("before compile model")
     with compile_model(Y, target, "./tmp", "add_one") as module:
+        #print(Y)
         y = torch.empty(shapes).cuda().half()
         inputs = {"X": x}
-        outputs = {"Y": y}
+        outputs = {"Y0": y}
         module.run_with_tensors(inputs, outputs)
         print(torch.allclose(y, y_pt, atol=1e-2, rtol=1e-2))
 
