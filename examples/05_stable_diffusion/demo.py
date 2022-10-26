@@ -28,7 +28,7 @@ from pipeline_stable_diffusion_ait import StableDiffusionAITPipeline
 )
 def run(token, batch_size, prompt, benchmark):
     pipe = StableDiffusionAITPipeline.from_pretrained(
-        "CompVis/stable-diffusion-v1-4",
+        "runwayml/stable-diffusion-v1-5",
         revision="fp16",
         torch_dtype=torch.float16,
         use_auth_token=token,
