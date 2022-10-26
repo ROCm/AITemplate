@@ -16,7 +16,7 @@ from collections import OrderedDict
 
 import torch
 
-from aitemplate.compiler import compile_model
+from aitemplate.compiler import compile_model, ops
 from aitemplate.frontend import nn, Tensor
 from aitemplate.testing import detect_target
 from aitemplate.testing.benchmark_pt import benchmark_torch_function
@@ -26,32 +26,38 @@ from aitemplate.utils.graph_utils import sorted_graph_pseudo_code
 class PTSimpleModel(torch.nn.Module):
     def __init__(self, hidden, eps: float = 1e-5):
         super().__init__()
-        self.dense1 = torch.nn.Linear(hidden, 4 * hidden)
+        self.dense1 = torch.nn.Linear(hidden, 2 * hidden)
         self.act1 = torch.nn.functional.gelu
-        self.dense2 = torch.nn.Linear(4 * hidden, hidden)
-        self.layernorm = torch.nn.LayerNorm(hidden, eps=eps)
+        self.dense2 = torch.nn.Linear(hidden, 2 * hidden)
+        #self.layernorm = torch.nn.LayerNorm(hidden, eps=eps)
+
+        #self.dense1 = torch.nn.LayerNorm(hidden, eps=eps)
+        #self.dense2 = torch.nn.LayerNorm(hidden, eps=eps)
 
     def forward(self, input):
-        hidden_states = self.dense1(input)
-        hidden_states = self.act1(hidden_states)
-        hidden_states = self.dense2(hidden_states)
-        hidden_states = hidden_states + input
-        hidden_states = self.layernorm(hidden_states)
+        hidden_states_0 = self.dense1(input)
+        hidden_states_0 = self.act1(hidden_states_0)
+        hidden_states_1 = self.dense2(input)
+        hidden_states = torch.cat([hidden_states_0, hidden_states_1], dim=-1)
         return hidden_states
 
 
 class AITSimpleModel(nn.Module):
     def __init__(self, hidden, eps: float = 1e-5):
         super().__init__()
-        self.dense1 = nn.Linear(hidden, 4 * hidden, specialization="fast_gelu")
-        self.dense2 = nn.Linear(4 * hidden, hidden)
-        self.layernorm = nn.LayerNorm(hidden, eps=eps)
+        self.dense1 = nn.Linear(hidden, 2 * hidden, specialization="fast_gelu")
+        self.dense2 = nn.Linear(hidden, 2 * hidden)
+        #self.layernorm = nn.LayerNorm(hidden, eps=eps)
+        #self.dense1 = nn.LayerNorm(hidden, eps=eps)
+        #self.dense2 = nn.LayerNorm(hidden, eps=eps)
 
     def forward(self, input):
-        hidden_states = self.dense1(input)
-        hidden_states = self.dense2(hidden_states)
-        hidden_states = hidden_states + input
-        hidden_states = self.layernorm(hidden_states)
+        hidden_states_0 = self.dense1(input)
+        hidden_states_1 = self.dense2(input)
+        #hidden_states = hidden_states + input
+        hidden_states = ops.concatenate()([hidden_states_0, hidden_states_1], dim=-1)
+        #hidden_states = ops.concatenate()([input, input], dim=-1)
+        #hidden_states = hidden_states_0 + hidden_states_1;
         return hidden_states
 
 
@@ -98,14 +104,17 @@ def verify_simple_model(batch_size=1024, hidden=512):
         Y, target, "./tmp", "simple_model_demo", constants=weights
     ) as module:
         # create storage for output tensor
-        y = torch.empty([batch_size, hidden]).cuda().half()
+        y = torch.empty([batch_size, hidden * 4]).cuda().half()
+        #y = torch.empty([batch_size, hidden * 2]).cuda().half()
 
         # inputs and outputs dict
         inputs = {"X": x}
         outputs = {"Y": y}
 
         # run
-        module.run_with_tensors(inputs, outputs, graph_mode=True)
+        module.run_with_tensors(inputs, outputs, graph_mode=False)
+        
+        #assert False
 
         # verify output is correct
         print(torch.allclose(y, y_pt, atol=1e-2, rtol=1e-2))
