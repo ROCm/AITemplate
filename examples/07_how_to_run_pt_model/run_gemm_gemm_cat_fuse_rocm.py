@@ -29,10 +29,6 @@ class PTSimpleModel(torch.nn.Module):
         self.dense1 = torch.nn.Linear(hidden, 2 * hidden)
         self.act1 = torch.nn.functional.gelu
         self.dense2 = torch.nn.Linear(hidden, 2 * hidden)
-        #self.layernorm = torch.nn.LayerNorm(hidden, eps=eps)
-
-        #self.dense1 = torch.nn.LayerNorm(hidden, eps=eps)
-        #self.dense2 = torch.nn.LayerNorm(hidden, eps=eps)
 
     def forward(self, input):
         hidden_states_0 = self.dense1(input)
@@ -47,17 +43,11 @@ class AITSimpleModel(nn.Module):
         super().__init__()
         self.dense1 = nn.Linear(hidden, 2 * hidden, specialization="fast_gelu")
         self.dense2 = nn.Linear(hidden, 2 * hidden)
-        #self.layernorm = nn.LayerNorm(hidden, eps=eps)
-        #self.dense1 = nn.LayerNorm(hidden, eps=eps)
-        #self.dense2 = nn.LayerNorm(hidden, eps=eps)
 
     def forward(self, input):
         hidden_states_0 = self.dense1(input)
         hidden_states_1 = self.dense2(input)
-        #hidden_states = hidden_states + input
         hidden_states = ops.concatenate()([hidden_states_0, hidden_states_1], dim=-1)
-        #hidden_states = ops.concatenate()([input, input], dim=-1)
-        #hidden_states = hidden_states_0 + hidden_states_1;
         return hidden_states
 
 
@@ -105,7 +95,6 @@ def verify_simple_model(batch_size=1024, hidden=512):
     ) as module:
         # create storage for output tensor
         y = torch.empty([batch_size, hidden * 4]).cuda().half()
-        #y = torch.empty([batch_size, hidden * 2]).cuda().half()
 
         # inputs and outputs dict
         inputs = {"X": x}
@@ -131,7 +120,7 @@ def verify_simple_model(batch_size=1024, hidden=512):
 
         # check out the fused graph
         # there are only fused ops in the final graph
-        # gemm_rcr_bias_fast_gelu, gemm_rcr_bias_add, and layernorm
+        # gemm_rcr_bias_fast_gelu, gemm_rcr_bias_add, and concatenate
         graph = module.debug_sorted_graph
         print("Final graph:")
         print(sorted_graph_pseudo_code(graph))
