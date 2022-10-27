@@ -204,11 +204,6 @@ def gemm_gen_function(func_attrs, exec_cond_template, dim_info_dict):
     str
         The rendered template of generated function body.
     """
-    #input_addr_calculator = gemm_rcr.get_input_addr_calculator(func_attrs)
-    input_ndims = len(func_attrs["input_accessors"][0].original_shapes)
-    weight_ndims = len(func_attrs["input_accessors"][1].original_shapes)
-    output_ndims = len(func_attrs["output_accessors"][0].original_shapes)
-    print(input_ndims)
     return common.gen_function(
         func_attrs, 
         exec_cond_template, 
