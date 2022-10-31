@@ -42,7 +42,7 @@ jobs:
         c++ --verbose
     - name: Build AITemplate
       run: |
-              sudo docker run --network=host --device=/dev/kfd --device=/dev/dri/renderD129 --ipc=host --shm-size 16G --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -v ~/dockerx:/dockerx rocm/composable_kernel:ait_rocm5.3
+        sudo docker run --network=host --device=/dev/kfd --device=/dev/dri/renderD129 --ipc=host --shm-size 16G --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -v ~/dockerx:/dockerx rocm/composable_kernel:ait_rocm5.3
         rm -rf AITemplate
         auth_header="$(git config --local --get http.https://github.com/.extraheader)"
         git -c "http.extraheader=$auth_header" -c protocol.version=2 clone --recursive -b ci-setup https://github.com/ROCmSoftwarePlatform/AITemplate.git
