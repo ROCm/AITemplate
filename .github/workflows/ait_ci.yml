@@ -43,8 +43,9 @@ jobs:
         rm -rf AITemplate
         export ROCM_PATH=/opt/rocm
         export ROC_USE_FGS_KERNARG=0
-        auth_header="$(git config --local --get http.https://github.com/.extraheader)"
-        git -c "http.extraheader=$auth_header" -c protocol.version=2 clone --recursive -b ci-setup https://github.com/ROCmSoftwarePlatform/AITemplate.git
+        #auth_header="$(git config --local --get http.https://github.com/.extraheader)"
+        #git -c "http.extraheader=$auth_header" -c protocol.version=2 clone --recursive -b ci-setup https://github.com/ROCmSoftwarePlatform/AITemplate.git
+        git clone --recursive https://github.com/facebookincubator/AITemplate.git
         # clean up and reinstall ait
         cd AITemplate
         pip3 uninstall -y aitemplate
@@ -70,9 +71,9 @@ jobs:
         ## BERT
         cd ../03_bert/
         chmod a+x benchmark_mi250.sh
-        ./benchmark_mi250.sh 16
+        ./benchmark_mi250.sh 128
         ## VIT
         cd ../04_vit/
         chmod a+x benchmark_mi250.sh
-        ./benchmark_mi250.sh 16
+        ./benchmark_mi250.sh 128
 
