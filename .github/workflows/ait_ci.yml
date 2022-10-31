@@ -52,7 +52,7 @@ jobs:
         rm -rf dist build
         python3 setup.py bdist_wheel
         pip3 install dist/*.whl
-        pip3 install -y torch torchvision
+        pip3 install torch torchvision
         cd ../examples/01_resnet-50/
         HIP_VISIBLE_DEVICES=0,1 python3 benchmark_ait.py
         for BATCH_SIZE in 1 2 4 8 16 32 64 128 256
