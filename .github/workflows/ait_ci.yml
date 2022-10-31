@@ -39,13 +39,16 @@ jobs:
       run: |
         rocm-smi
         rocminfo | grep "gfx"
-        docker run --network=host --device=/dev/kfd --device=/dev/dri/renderD129 --ipc=host --shm-size 16G --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -v ~/dockerx:/dockerx rocm/composable_kernel:ait_rocm5.3
-        rm -rf AITemplate
-        export ROCM_PATH=/opt/rocm
-        export ROC_USE_FGS_KERNARG=0
+        #docker run --network=host --device=/dev/kfd --device=/dev/dri/renderD129 --ipc=host --shm-size 16G --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -v ~/dockerx:/dockerx rocm/composable_kernel:ait_rocm5.3
+        #rm -rf AITemplate
         #auth_header="$(git config --local --get http.https://github.com/.extraheader)"
         #git -c "http.extraheader=$auth_header" -c protocol.version=2 clone --recursive -b ci-setup https://github.com/ROCmSoftwarePlatform/AITemplate.git
         git clone --recursive https://github.com/facebookincubator/AITemplate.git
+        cd AITemplate
+        DOCKER_BUILDKIT=1 ./docker/build.sh rocm
+        docker run --network=host --device=/dev/kfd --device=/dev/dri/renderD129 --ipc=host --shm-size 16G --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -v ~/dockerx:/dockerx ait:latest
+        export ROCM_PATH=/opt/rocm
+        export ROC_USE_FGS_KERNARG=0
         # clean up and reinstall ait
         cd AITemplate
         pip3 uninstall -y aitemplate
