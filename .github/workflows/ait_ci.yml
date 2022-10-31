@@ -42,37 +42,36 @@ jobs:
         c++ --verbose
     - name: Build AITemplate
       run: |
-	alias drun='sudo docker run -it --network=host --device=/dev/kfd --device=/dev/dri/renderD129 --ipc=host --shm-size 16G --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -v ~/dockerx:/dockerx'
-	drun rocm/composable_kernel:ait_rocm5.3
-	rm -rf AITemplate
-	auth_header="$(git config --local --get http.https://github.com/.extraheader)"
-	git -c "http.extraheader=$auth_header" -c protocol.version=2 clone --recursive -b ci-setup https://github.com/ROCmSoftwarePlatform/AITemplate.git
-	# clean up and reinstall ait
-	cd AITemplate
-	pip3 uninstall -y aitemplate
-	cd python
-	rm -rf dist build
-	python3 setup.py bdist_wheel
-	pip3 install dist/*.whl
+        alias drun='sudo docker run -it --network=host --device=/dev/kfd --device=/dev/dri/renderD129 --ipc=host --shm-size 16G --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -v ~/dockerx:/dockerx'
+        drun rocm/composable_kernel:ait_rocm5.3
+        rm -rf AITemplate
+        auth_header="$(git config --local --get http.https://github.com/.extraheader)"
+        git -c "http.extraheader=$auth_header" -c protocol.version=2 clone --recursive -b ci-setup https://github.com/ROCmSoftwarePlatform/AITemplate.git
+        # clean up and reinstall ait
+        cd AITemplate
+        pip3 uninstall -y aitemplate
+        cd python
+        rm -rf dist build
+        python3 setup.py bdist_wheel
+        pip3 install dist/*.whl
     - name: Test AITemplate
       run: |
-	cd ../examples/01_resnet-50/
-	HIP_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python3 benchmark_ait.py
-	for BATCH_SIZE in 1 2 4 8 16 32 64 128 256
-	do
-	  HIP_VISIBLE_DEVICES=0 python3 benchmark_ait.py --batch-size $BATCH_SIZE
-	done
-	# test 2 gcd
-	for BATCH_SIZE in 1 2 4 8 16 32 64 128 256
-	do
+        cd ../examples/01_resnet-50/
+        HIP_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python3 benchmark_ait.py
+        for BATCH_SIZE in 1 2 4 8 16 32 64 128 256
+        do
+          HIP_VISIBLE_DEVICES=0 python3 benchmark_ait.py --batch-size $BATCH_SIZE
+        done
+        # test 2 gcd
+        for BATCH_SIZE in 1 2 4 8 16 32 64 128 256
+        do
           HIP_VISIBLE_DEVICES=0 python3 benchmark_ait.py --batch-size $BATCH_SIZE &
           HIP_VISIBLE_DEVICES=1 python3 benchmark_ait.py --batch-size $BATCH_SIZE && fg
-	done			
-	## BERT
-	cd ../03_bert/
-	bash ./benchmark_mi250.sh |& tee bert.log
-	## VIT
-	cd 04_vit/
-	bash ./benchmark_mi250.sh |& tee vit.log
-
+        done
+        ## BERT
+        cd ../03_bert/
+        bash ./benchmark_mi250.sh |& tee bert.log
+        ## VIT
+        cd ../04_vit/
+        bash ./benchmark_mi250.sh |& tee vit.log
 
