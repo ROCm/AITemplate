@@ -45,20 +45,11 @@ jobs:
         #git -c "http.extraheader=$auth_header" -c protocol.version=2 clone --recursive -b ci-setup https://github.com/ROCmSoftwarePlatform/AITemplate.git
         git clone --recursive -b ci-setup https://github.com/ROCmSoftwarePlatform/AITemplate.git
         cd AITemplate
-        #git checkout 3b6a19506bb269e9f8df82d8d3d347dda0085543
-        #cd 3rdparty/composable_kernel/
-        #git checkout 40942b9
-        #cd ../..
-        #git clone --recursive https://github.com/facebookincubator/AITemplate.git
-        #cd AITemplate
         DOCKER_BUILDKIT=1 ./docker/build.sh rocm
         docker run --network=host --device=/dev/kfd --device=/dev/dri --ipc=host --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -v $HOME:/dockerx/ ait:latest
         export ROCM_PATH=/opt/rocm
         export ROC_USE_FGS_KERNARG=0
         # clean up and reinstall ait
-        pwd
-        ls
-        #cd AITemplate
         pip3 uninstall -y aitemplate
         cd python
         rm -rf dist build
@@ -66,29 +57,39 @@ jobs:
         pip3 install dist/*.whl
         #install necessary python modules
         pip3 install timm
-        pip3 uninstall -y torch tochvision torchaudio
-        pip3 install --pre torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/rocm5.1.1
+        pip3 uninstall -y torch 
+        pip3 install torch --extra-index-url https://download.pytorch.org/whl/rocm5.1.1
         python3 -m pip install transformers click
         python3 -c "import torch; print(torch.__version__)"
         #run examples
         cd ../examples/01_resnet-50/
         HIP_VISIBLE_DEVICES=0,1 python3 benchmark_ait.py
-        #for BATCH_SIZE in 1 2 4 8 16 32 64 128 256
-        #do
-        #  HIP_VISIBLE_DEVICES=0 python3 benchmark_ait.py --batch-size $BATCH_SIZE
-        #done
         # test 2 gcd
-        #for BATCH_SIZE in 1 2 4 8 16 32 64 128 256
-        #do
-        #  HIP_VISIBLE_DEVICES=0 python3 benchmark_ait.py --batch-size $BATCH_SIZE &
-        #  HIP_VISIBLE_DEVICES=1 python3 benchmark_ait.py --batch-size $BATCH_SIZE && fg
-        #done
+        for BATCH_SIZE in 1 2 4 8 16 32 64 128 256
+        do
+          HIP_VISIBLE_DEVICES=0 python3 benchmark_ait.py --batch-size $BATCH_SIZE &
+          HIP_VISIBLE_DEVICES=1 python3 benchmark_ait.py --batch-size $BATCH_SIZE && fg
+        done
         ## BERT
         cd ../03_bert/
-        chmod a+x benchmark_mi250.sh
-        ./benchmark_mi250.sh 128
-        ## VIT
-        cd ../04_vit/
-        chmod a+x benchmark_mi250.sh
-        ./benchmark_mi250.sh 128
-
+        # profiling
+        HIP_VISIBLE_DEVICES=0,1 python3 benchmark_ait.py
+        # # test 2 gcd
+        for SEQ_LENGTH in 64 128 384 1024 4096
+        do
+        for BATCH_SIZE in 1 2 4 8 16 32 64 128 256
+        do
+            HIP_VISIBLE_DEVICES=0 python3 benchmark_ait.py --batch-size $BATCH_SIZE --seq-length $SEQ_LENGTH &
+            HIP_VISIBLE_DEVICES=1 python3 benchmark_ait.py --batch-size $BATCH_SIZE --seq-length $SEQ_LENGTH && fg
+        done
+        done
+        # VIT
+        cd ../04_vit
+        # profiling
+        HIP_VISIBLE_DEVICES=0,1 python3 benchmark_ait.py
+        # test 2 gcd
+        for BATCH_SIZE in 1 2 4 8 16 32 64 128 256
+        do
+           HIP_VISIBLE_DEVICES=0 python3 benchmark_ait.py --batch-size $BATCH_SIZE &
+           HIP_VISIBLE_DEVICES=1 python3 benchmark_ait.py --batch-size $BATCH_SIZE && fg
+        done
