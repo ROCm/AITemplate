@@ -68,7 +68,7 @@ jobs:
         for BATCH_SIZE in 1 2 4 8 16 32 64 128 256
         do
           HIP_VISIBLE_DEVICES=0 python3 benchmark_ait.py --batch-size $BATCH_SIZE &
-          HIP_VISIBLE_DEVICES=1 python3 benchmark_ait.py --batch-size $BATCH_SIZE && fg
+          HIP_VISIBLE_DEVICES=1 python3 benchmark_ait.py --batch-size $BATCH_SIZE
         done
         ## BERT
         cd ../03_bert/
@@ -80,7 +80,7 @@ jobs:
         for BATCH_SIZE in 1 2 4 8 16 32 64 128 256
         do
             HIP_VISIBLE_DEVICES=0 python3 benchmark_ait.py --batch-size $BATCH_SIZE --seq-length $SEQ_LENGTH &
-            HIP_VISIBLE_DEVICES=1 python3 benchmark_ait.py --batch-size $BATCH_SIZE --seq-length $SEQ_LENGTH && fg
+            HIP_VISIBLE_DEVICES=1 python3 benchmark_ait.py --batch-size $BATCH_SIZE --seq-length $SEQ_LENGTH
         done
         done
         # VIT
@@ -91,5 +91,5 @@ jobs:
         for BATCH_SIZE in 1 2 4 8 16 32 64 128 256
         do
            HIP_VISIBLE_DEVICES=0 python3 benchmark_ait.py --batch-size $BATCH_SIZE &
-           HIP_VISIBLE_DEVICES=1 python3 benchmark_ait.py --batch-size $BATCH_SIZE && fg
+           HIP_VISIBLE_DEVICES=1 python3 benchmark_ait.py --batch-size $BATCH_SIZE
         done
