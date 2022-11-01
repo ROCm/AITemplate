@@ -66,7 +66,8 @@ jobs:
         pip3 install dist/*.whl
         #install necessary python modules
         pip3 install timm
-        #pip3 install --pre torch torchvision --extra-index-url https://download.pytorch.org/whl/nightly/rocm5.2/
+        pip3 uninstall -y torch tochvision torchaudio
+        pip3 install --pre torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/rocm5.1.1
         python3 -m pip install transformers click
         python3 -c "import torch; print(torch.__version__)"
         #run examples
