@@ -94,11 +94,14 @@ jobs:
            HIP_VISIBLE_DEVICES=0 python3 benchmark_ait.py --batch-size $BATCH_SIZE 2>&1 | tee -a vit.log &
            HIP_VISIBLE_DEVICES=1 python3 benchmark_ait.py --batch-size $BATCH_SIZE 2>&1 | tee -a vit.log
         done
-    - name: Archive test results
+    - name: Archive resnet50 logs
       uses: actions/upload-artifact@v3
-      with:
-        name: test results
-        path: $GITHUB_WORKSPACE/AITemplate/examples/**/*.log
+        name: resnet50 results
+        path: $GITHUB_WORKSPACE/AITemplate/examples/01_resnet-50/resnet50.log
+     - name: Archive VIT logs
+       uses: actions/upload-artifact@v3
+         name: VIT results
+         path: $GITHUB_WORKSPACE/AITemplate/examples/04_vit/vit.log
     - name: Process the test results
       run: |
         echo "processing the test results"
