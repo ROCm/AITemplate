@@ -43,8 +43,13 @@ jobs:
         #rm -rf AITemplate
         auth_header="$(git config --local --get http.https://github.com/.extraheader)"
         git -c "http.extraheader=$auth_header" -c protocol.version=2 clone --recursive -b ci-setup https://github.com/ROCmSoftwarePlatform/AITemplate.git
-        #git clone --recursive https://github.com/facebookincubator/AITemplate.git
         cd AITemplate
+        git checkout 3b6a19506bb269e9f8df82d8d3d347dda0085543
+        cd 3rdparty/composable_kernel/
+        git checkout 40942b9
+        cd ../..
+        #git clone --recursive https://github.com/facebookincubator/AITemplate.git
+        #cd AITemplate
         DOCKER_BUILDKIT=1 ./docker/build.sh rocm
         docker run --network=host --device=/dev/kfd --device=/dev/dri --ipc=host --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -v $HOME:/dockerx/ ait:latest
         export ROCM_PATH=/opt/rocm
