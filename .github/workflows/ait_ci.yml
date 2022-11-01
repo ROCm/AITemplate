@@ -31,7 +31,7 @@ jobs:
         echo GITHUB_SHA        = $GITHUB_SHA
         echo GITHUB_REF        = $GITHUB_REF
         c++ --verbose
-    - name: Build and Test AITemplate
+    - name: Build AITemplate
       run: |
         rocm-smi
         rocminfo | grep "gfx"
@@ -54,7 +54,9 @@ jobs:
         python3 -m pip install transformers click
         python3 -c "import torch; print(torch.__version__)"
         #run examples
-        cd ../examples/01_resnet-50/
+    - name: Run Resnet-50 Tests
+      run: |
+        cd /AITemplate/examples/01_resnet-50/
         echo "Running RESNET50 tests"
         HIP_VISIBLE_DEVICES=0,1 python3 benchmark_ait.py 2>&1 | tee resnet50.log
         # test 2 gcd
@@ -64,7 +66,9 @@ jobs:
           HIP_VISIBLE_DEVICES=1 python3 benchmark_ait.py --batch-size $BATCH_SIZE 2>&1 | tee -a resnet50.log
         done
         ## BERT
-        #cd ../03_bert/
+    - name: Run BERT Tests
+      run: |
+        #cd /AITemplate/examples/03_bert/
         echo "BERT tests are temporarily disabled"
         # profiling
         #HIP_VISIBLE_DEVICES=0,1 python3 benchmark_ait.py
@@ -78,7 +82,9 @@ jobs:
         #done
         #done
         # VIT
-        cd ../04_vit
+    - name: Run VIT Tests
+      run: |
+        cd /AITemplate/examples/04_vit
         echo "Running VIT tests"
         # profiling
         HIP_VISIBLE_DEVICES=0,1 python3 benchmark_ait.py 2>&1 | tee vit.log
@@ -92,7 +98,7 @@ jobs:
       uses: actions/upload-artifact@v3
       with:
         name: test results
-        path: /home/AITemplate/examples/*/*.log
+        path: /AITemplate/examples/*/*.log
     - name: Process the test results
       run: |
         echo "processing the test results"
