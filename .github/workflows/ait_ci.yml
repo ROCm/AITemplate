@@ -41,13 +41,14 @@ jobs:
         rocminfo | grep "gfx"
         #docker run --network=host --device=/dev/kfd --device=/dev/dri/renderD129 --ipc=host --shm-size 16G --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -v ~/dockerx:/dockerx rocm/composable_kernel:ait_rocm5.3
         #rm -rf AITemplate
-        auth_header="$(git config --local --get http.https://github.com/.extraheader)"
-        git -c "http.extraheader=$auth_header" -c protocol.version=2 clone --recursive -b ci-setup https://github.com/ROCmSoftwarePlatform/AITemplate.git
+        #auth_header="$(git config --local --get http.https://github.com/.extraheader)"
+        #git -c "http.extraheader=$auth_header" -c protocol.version=2 clone --recursive -b ci-setup https://github.com/ROCmSoftwarePlatform/AITemplate.git
+        git clone --recursive -b ci-setup https://github.com/ROCmSoftwarePlatform/AITemplate.git
         cd AITemplate
-        git checkout 3b6a19506bb269e9f8df82d8d3d347dda0085543
-        cd 3rdparty/composable_kernel/
-        git checkout 40942b9
-        cd ../..
+        #git checkout 3b6a19506bb269e9f8df82d8d3d347dda0085543
+        #cd 3rdparty/composable_kernel/
+        #git checkout 40942b9
+        #cd ../..
         #git clone --recursive https://github.com/facebookincubator/AITemplate.git
         #cd AITemplate
         DOCKER_BUILDKIT=1 ./docker/build.sh rocm
@@ -55,17 +56,20 @@ jobs:
         export ROCM_PATH=/opt/rocm
         export ROC_USE_FGS_KERNARG=0
         # clean up and reinstall ait
-        #pwd
-        #ls
+        pwd
+        ls
         #cd AITemplate
-        #pip3 uninstall -y aitemplate
-        #cd python
-        #rm -rf dist build
-        #python3 setup.py bdist_wheel
-        #pip3 install dist/*.whl
-        #pip3 install timm
+        pip3 uninstall -y aitemplate
+        cd python
+        rm -rf dist build
+        python3 setup.py bdist_wheel
+        pip3 install dist/*.whl
+        #install necessary python modules
+        pip3 install timm
         #pip3 install --pre torch torchvision --extra-index-url https://download.pytorch.org/whl/nightly/rocm5.2/
         python3 -m pip install transformers click
+        python3 -c "import torch; print(torch.__version__)"
+        #run examples
         cd ../examples/01_resnet-50/
         HIP_VISIBLE_DEVICES=0,1 python3 benchmark_ait.py
         #for BATCH_SIZE in 1 2 4 8 16 32 64 128 256
@@ -79,9 +83,9 @@ jobs:
         #  HIP_VISIBLE_DEVICES=1 python3 benchmark_ait.py --batch-size $BATCH_SIZE && fg
         #done
         ## BERT
-        #cd ../03_bert/
-        #chmod a+x benchmark_mi250.sh
-        #./benchmark_mi250.sh 128
+        cd ../03_bert/
+        chmod a+x benchmark_mi250.sh
+        ./benchmark_mi250.sh 128
         ## VIT
         cd ../04_vit/
         chmod a+x benchmark_mi250.sh
