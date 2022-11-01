@@ -50,9 +50,9 @@ jobs:
         export ROCM_PATH=/opt/rocm
         export ROC_USE_FGS_KERNARG=0
         # clean up and reinstall ait
-        pwd
-        ls
-        cd AITemplate
+        #pwd
+        #ls
+        #cd AITemplate
         pip3 uninstall -y aitemplate
         cd python
         rm -rf dist build
