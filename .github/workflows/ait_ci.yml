@@ -56,7 +56,7 @@ jobs:
         #run examples
     - name: Run Resnet-50 Tests
       run: |
-        cd /AITemplate/examples/01_resnet-50/
+        cd $GITHUB_WORKSPACE/AITemplate/examples/01_resnet-50
         echo "Running RESNET50 tests"
         HIP_VISIBLE_DEVICES=0,1 python3 benchmark_ait.py 2>&1 | tee resnet50.log
         # test 2 gcd
@@ -84,7 +84,7 @@ jobs:
         # VIT
     - name: Run VIT Tests
       run: |
-        cd /AITemplate/examples/04_vit
+        cd $GITHUB_WORKSPACE/AITemplate/examples/04_vit
         echo "Running VIT tests"
         # profiling
         HIP_VISIBLE_DEVICES=0,1 python3 benchmark_ait.py 2>&1 | tee vit.log
@@ -98,7 +98,7 @@ jobs:
       uses: actions/upload-artifact@v3
       with:
         name: test results
-        path: /AITemplate/examples/*/*.log
+        path: $GITHUB_WORKSPACE/AITemplate/examples/*/*.log
     - name: Process the test results
       run: |
         echo "processing the test results"
