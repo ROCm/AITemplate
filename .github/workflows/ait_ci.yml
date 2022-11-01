@@ -53,12 +53,12 @@ jobs:
         #pwd
         #ls
         #cd AITemplate
-        pip3 uninstall -y aitemplate
-        cd python
-        rm -rf dist build
-        python3 setup.py bdist_wheel
-        pip3 install dist/*.whl
-        pip3 install timm
+        #pip3 uninstall -y aitemplate
+        #cd python
+        #rm -rf dist build
+        #python3 setup.py bdist_wheel
+        #pip3 install dist/*.whl
+        #pip3 install timm
         #pip3 install --pre torch torchvision --extra-index-url https://download.pytorch.org/whl/nightly/rocm5.2/
         python3 -m pip install transformers click
         cd ../examples/01_resnet-50/
