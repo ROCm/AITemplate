@@ -88,5 +88,14 @@ jobs:
            HIP_VISIBLE_DEVICES=0 python3 benchmark_ait.py --batch-size $BATCH_SIZE 2>&1 | tee -a vit.log &
            HIP_VISIBLE_DEVICES=1 python3 benchmark_ait.py --batch-size $BATCH_SIZE 2>&1 | tee -a vit.log
         done
-        echo "Process the test results"
+    - name: Archive test results
+      uses: actions/upload-artifact@v3
+      with:
+        name: test results
+        path: /home/AITemplate/examples/*/*.log
+    - name: Process the test results
+      run: |
+        echo "processing the test results"
+        #python3 ${{ env.DEVOPS_DIR }}/process_results.py /5AITemplate/examples/01_resnet-50/resnet50.log
+        #python3 ${{ env.DEVOPS_DIR }}/process_results.py /AITemplate/examples/04_vit/vit.log
 
