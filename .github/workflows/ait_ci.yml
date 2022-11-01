@@ -46,7 +46,7 @@ jobs:
         #git clone --recursive https://github.com/facebookincubator/AITemplate.git
         cd AITemplate
         DOCKER_BUILDKIT=1 ./docker/build.sh rocm
-        docker run --network=host --device=/dev/kfd --device=/dev/dri/renderD129 --ipc=host --shm-size 16G --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -v ~/dockerx:/dockerx ait:latest
+        docker run --network=host --device=/dev/kfd --device=/dev/dri --ipc=host --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -v ~HOME:/dockerx ait:latest
         export ROCM_PATH=/opt/rocm
         export ROC_USE_FGS_KERNARG=0
         # clean up and reinstall ait
@@ -59,7 +59,7 @@ jobs:
         python3 setup.py bdist_wheel
         pip3 install dist/*.whl
         pip3 install timm
-        pip3 install --pre torch torchvision --extra-index-url https://download.pytorch.org/whl/nightly/rocm5.2/
+        #pip3 install --pre torch torchvision --extra-index-url https://download.pytorch.org/whl/nightly/rocm5.2/
         python3 -m pip install transformers click
         cd ../examples/01_resnet-50/
         HIP_VISIBLE_DEVICES=0,1 python3 benchmark_ait.py
