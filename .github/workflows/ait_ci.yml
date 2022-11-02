@@ -98,12 +98,12 @@ jobs:
       uses: actions/upload-artifact@v3
       with:
         name: resnet50 results
-        path: $GITHUB_WORKSPACE/AITemplate/examples/01_resnet-50/resnet50.log
+        path: AITemplate/examples/01_resnet-50/resnet50.log
     - name: Archive VIT logs
       uses: actions/upload-artifact@v3
       with:
         name: VIT results
-        path: $GITHUB_WORKSPACE/AITemplate/examples/04_vit/vit.log
+        path: AITemplate/examples/04_vit/vit.log
     - name: Process the test results
       run: |
         echo "processing the test results"
