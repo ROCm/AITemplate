@@ -30,6 +30,8 @@ jobs:
         echo GITHUB_WORKSPACE  = $GITHUB_WORKSPACE
         echo GITHUB_SHA        = $GITHUB_SHA
         echo GITHUB_REF        = $GITHUB_REF
+        GIT_BRANCH=${GITHUB_BASE_REF:-${GITHUB_REF#refs/heads/}}
+        echo "GIT_BRANCH=$GIT_BRANCH"
         c++ --verbose
     - name: Build AITemplate
       run: |
@@ -58,7 +60,13 @@ jobs:
       run: |
         echo "Running RESNET50 tests"
         cd $GITHUB_WORKSPACE/AITemplate/examples/01_resnet-50
-        HIP_VISIBLE_DEVICES=0,1 python3 benchmark_ait.py 2>&1 | tee resnet50.log
+        echo -n "hostname: ">resnet50.log; hostname >> resnet50.log
+        echo -n "GPU_arch: " >> resnet50.log; rocminfo | grep "Name:" | grep "gfx" >> resnet50.log
+        rocminfo | grep "Compute Unit:" >> resnet50.log
+        echo -n "git_branch: $GIT_BRANCH" >> resnet50.log
+        git show --summary | grep commit >> resnet50.log
+        /opt/rocm/bin/amdclang++ --version | grep -e 'InstalledDir' >> resnet50.log
+        HIP_VISIBLE_DEVICES=0,1 python3 benchmark_ait.py 2>&1 | tee -a resnet50.log
         # test 2 gcd
         for BATCH_SIZE in 1 2 4 8 16 32 64 128 256
         do
@@ -86,24 +94,25 @@ jobs:
       run: |
         echo "Running VIT tests"
         cd $GITHUB_WORKSPACE/AITemplate/examples/04_vit
+        echo -n "hostname: ">vit.log; hostname >> vit.log
+        echo -n "GPU_arch: " >> vit.log; rocminfo | grep "Name:" | grep "gfx" >> vit.log
+        rocminfo | grep "Compute Unit:" >> vit.log
+        echo -n "git_branch: $GIT_BRANCH" >> vit.log
+        git show --summary | grep commit >> vit.log
+        /opt/rocm/bin/amdclang++ --version | grep -e 'InstalledDir' >> vit.log
         # profiling
-        HIP_VISIBLE_DEVICES=0,1 python3 benchmark_ait.py 2>&1 | tee vit.log
+        HIP_VISIBLE_DEVICES=0,1 python3 benchmark_ait.py 2>&1 | tee -a vit.log
         # test 2 gcd
         for BATCH_SIZE in 1 2 4 8 16 32 64 128 256
         do
            HIP_VISIBLE_DEVICES=0 python3 benchmark_ait.py --batch-size $BATCH_SIZE 2>&1 | tee -a vit.log &
            HIP_VISIBLE_DEVICES=1 python3 benchmark_ait.py --batch-size $BATCH_SIZE 2>&1 | tee -a vit.log
         done
-    - name: Archive resnet50 logs
+    - name: Archive logs
       uses: actions/upload-artifact@v3
       with:
-        name: resnet50 results
-        path: AITemplate/examples/01_resnet-50/resnet50.log
-    - name: Archive VIT logs
-      uses: actions/upload-artifact@v3
-      with:
-        name: VIT results
-        path: AITemplate/examples/04_vit/vit.log
+        name: test results
+        path: AITemplate/examples/*/*.log
     - name: Process the test results
       run: |
         echo "processing the test results"
