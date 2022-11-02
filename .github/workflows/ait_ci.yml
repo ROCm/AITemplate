@@ -11,8 +11,7 @@ on:
 jobs:
   build:
     runs-on: rocm
-    env:
-      GIT_BRANCH=${GITHUB_BASE_REF:-${GITHUB_REF#refs/heads/}}
+
     steps:
     - uses: actions/checkout@v2
     - name: Get CPU info on Ubuntu
@@ -31,6 +30,7 @@ jobs:
         echo GITHUB_WORKSPACE  = $GITHUB_WORKSPACE
         echo GITHUB_SHA        = $GITHUB_SHA
         echo GITHUB_REF        = $GITHUB_REF
+        export GIT_BRANCH=${GITHUB_BASE_REF:-${GITHUB_REF#refs/heads/}}
         echo GIT_BRANCH        = $GIT_BRANCH
         c++ --verbose
     - name: Build AITemplate
