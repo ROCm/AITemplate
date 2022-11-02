@@ -11,7 +11,8 @@ on:
 jobs:
   build:
     runs-on: rocm
-
+    env:
+      GIT_BRANCH=${GITHUB_BASE_REF:-${GITHUB_REF#refs/heads/}}
     steps:
     - uses: actions/checkout@v2
     - name: Get CPU info on Ubuntu
@@ -30,14 +31,13 @@ jobs:
         echo GITHUB_WORKSPACE  = $GITHUB_WORKSPACE
         echo GITHUB_SHA        = $GITHUB_SHA
         echo GITHUB_REF        = $GITHUB_REF
-        GIT_BRANCH=${GITHUB_BASE_REF:-${GITHUB_REF#refs/heads/}}
-        echo "GIT_BRANCH=$GIT_BRANCH"
+        echo GIT_BRANCH        = $GIT_BRANCH
         c++ --verbose
     - name: Build AITemplate
       run: |
         rocm-smi
         rocminfo | grep "gfx"
-        git clone --recursive -b ci-setup https://github.com/ROCmSoftwarePlatform/AITemplate.git
+        git clone --recursive -b $GIT_BRANCH https://github.com/ROCmSoftwarePlatform/AITemplate.git
         cd AITemplate
         DOCKER_BUILDKIT=1 ./docker/build.sh rocm
         docker run --network=host --device=/dev/kfd --device=/dev/dri --ipc=host --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -v $HOME:/dockerx/ ait:latest
@@ -60,10 +60,11 @@ jobs:
       run: |
         echo "Running RESNET50 tests"
         cd $GITHUB_WORKSPACE/AITemplate/examples/01_resnet-50
+        # populate log headers
         echo -n "hostname: ">resnet50.log; hostname >> resnet50.log
         echo -n "GPU_arch: " >> resnet50.log; rocminfo | grep "Name:" | grep "gfx" >> resnet50.log
         rocminfo | grep "Compute Unit:" >> resnet50.log
-        echo -n "git_branch: $GIT_BRANCH" >> resnet50.log
+        echo "git_branch: $GIT_BRANCH" >> resnet50.log
         git show --summary | grep commit >> resnet50.log
         /opt/rocm/bin/amdclang++ --version | grep -e 'InstalledDir' >> resnet50.log
         HIP_VISIBLE_DEVICES=0,1 python3 benchmark_ait.py 2>&1 | tee -a resnet50.log
@@ -78,6 +79,8 @@ jobs:
       run: |
         echo "BERT tests are temporarily disabled while using MI100"
         cd $GITHUB_WORKSPACE/AITemplate/examples/03_bert
+        # populate log headers
+        #
         # profiling
         #HIP_VISIBLE_DEVICES=0,1 python3 benchmark_ait.py 2>&1 | tee bert.log
         # # test 2 gcd
@@ -94,10 +97,11 @@ jobs:
       run: |
         echo "Running VIT tests"
         cd $GITHUB_WORKSPACE/AITemplate/examples/04_vit
+        # populate log headers
         echo -n "hostname: ">vit.log; hostname >> vit.log
         echo -n "GPU_arch: " >> vit.log; rocminfo | grep "Name:" | grep "gfx" >> vit.log
         rocminfo | grep "Compute Unit:" >> vit.log
-        echo -n "git_branch: $GIT_BRANCH" >> vit.log
+        echo "git_branch: $GIT_BRANCH" >> vit.log
         git show --summary | grep commit >> vit.log
         /opt/rocm/bin/amdclang++ --version | grep -e 'InstalledDir' >> vit.log
         # profiling
