@@ -37,6 +37,7 @@ jobs:
       run: |
         rocm-smi
         rocminfo | grep "gfx"
+        export GIT_BRANCH=${GITHUB_BASE_REF:-${GITHUB_REF#refs/heads/}}
         git clone --recursive -b $GIT_BRANCH https://github.com/ROCmSoftwarePlatform/AITemplate.git
         cd AITemplate
         DOCKER_BUILDKIT=1 ./docker/build.sh rocm
@@ -61,6 +62,7 @@ jobs:
         echo "Running RESNET50 tests"
         cd $GITHUB_WORKSPACE/AITemplate/examples/01_resnet-50
         # populate log headers
+        export GIT_BRANCH=${GITHUB_BASE_REF:-${GITHUB_REF#refs/heads/}}
         echo -n "hostname: ">resnet50.log; hostname >> resnet50.log
         echo -n "GPU_arch: " >> resnet50.log; rocminfo | grep "Name:" | grep "gfx" >> resnet50.log
         rocminfo | grep "Compute Unit:" >> resnet50.log
@@ -98,6 +100,7 @@ jobs:
         echo "Running VIT tests"
         cd $GITHUB_WORKSPACE/AITemplate/examples/04_vit
         # populate log headers
+        export GIT_BRANCH=${GITHUB_BASE_REF:-${GITHUB_REF#refs/heads/}}
         echo -n "hostname: ">vit.log; hostname >> vit.log
         echo -n "GPU_arch: " >> vit.log; rocminfo | grep "Name:" | grep "gfx" >> vit.log
         rocminfo | grep "Compute Unit:" >> vit.log
