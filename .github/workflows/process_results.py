@@ -146,7 +146,6 @@ def main():
                 sqlEngine = sqlalchemy.create_engine('mysql+pymysql://{0}:{1}@{2}:{3}/{4}'.
                     format(sql_username, sql_password, sql_hostname, tunnel.local_bind_port, sql_main_database))
         conn = sqlEngine.connect()
-    endif
     #save gemm performance tests:
     if 'resnet50' in filename or "vit.log" in filename:
         for i in range(1,len(results)+1):
