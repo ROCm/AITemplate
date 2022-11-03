@@ -128,31 +128,20 @@ def main():
     sql_password = os.environ["dbpassword"]
     sql_main_database = 'sys'
     sql_port = 3306
-    ssh_host = os.environ["dbsship"]
-    ssh_user = os.environ["dbsshuser"]
-    print("dbsshport=",os.environ["dbsshport"])
-    ssh_port = int(os.environ["dbsshport"])
-    ssh_pass = os.environ["dbsshpassword"]
 
-    with SSHTunnelForwarder(
-            (ssh_host, ssh_port),
-            ssh_username=ssh_user,
-            ssh_password=ssh_pass,
-            remote_bind_address=(sql_hostname, sql_port)) as tunnel:
+    sqlEngine = sqlalchemy.create_engine('mysql+pymysql://{0}:{1}@{2}/{3}'.
+        format(sql_username, sql_password, sql_hostname, sql_main_database))
+    conn = sqlEngine.connect()
 
-        sqlEngine = sqlalchemy.create_engine('mysql+pymysql://{0}:{1}@{2}:{3}/{4}'.
-            format(sql_username, sql_password, sql_hostname, tunnel.local_bind_port, sql_main_database))
-        conn = sqlEngine.connect()
-
-        #save gemm performance tests:
-        if 'resnet50' in filename or "vit.log" in filename:
-            for i in range(1,len(results)+1):
-                testlist.append("Test%i"%i)
-            table_name="ait_performance"
+    #save gemm performance tests:
+    if 'resnet50' in filename or "vit.log" in filename:
+        for i in range(1,len(results)+1):
+            testlist.append("Test%i"%i)
+        table_name="ait_performance"
         
-        baseline = get_baseline(table_name,conn)
-        store_new_test_result(table_name, results, testlist, node_id, branch_name, commit, gpu_arch, compute_units, ngpus, rocm_vers, compiler_vers, conn)
-        conn.close()
+    baseline = get_baseline(table_name,conn)
+    store_new_test_result(table_name, results, testlist, node_id, branch_name, commit, gpu_arch, compute_units, ngpus, rocm_vers, compiler_vers, conn)
+    conn.close()
 
     #compare the results to the baseline if baseline exists
     regression=0
