@@ -128,7 +128,7 @@ jobs:
         pip3 install --upgrade pip
         pip3 install sqlalchemy pymysql pandas sshtunnel setuptools-rust
         export dbuser=${{ secrets.DBUSER }}
-        export dbpassword=${{ secrets.DBUSER }}
+        export dbpassword=${{ secrets.DBPASSWORD }}
         export dbsship=${{ secrets.DBSSHIP }}
         export dbsshuser=${{ secrets.DBSSHUSER }}
         export dbsshport=${{ secrets.DBSSHPORT }}
