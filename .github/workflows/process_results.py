@@ -128,11 +128,25 @@ def main():
     sql_password = os.environ["dbpassword"]
     sql_main_database = 'sys'
     sql_port = 3306
-
-    sqlEngine = sqlalchemy.create_engine('mysql+pymysql://{0}:{1}@{2}/{3}'.
-        format(sql_username, sql_password, sql_hostname, sql_main_database))
-    conn = sqlEngine.connect()
-
+    hostname = os.environ["HOSTNAME"]
+    if hostname == 'jwr-amd-132':
+        sqlEngine = sqlalchemy.create_engine('mysql+pymysql://{0}:{1}@{2}/{3}'.
+            format(sql_username, sql_password, sql_hostname, sql_main_database))
+        conn = sqlEngine.connect()
+    else:
+        ssh_host = os.environ["dbsship"]
+        ssh_user = os.environ["dbsshuser"]
+        ssh_port = int(os.environ["dbsshport"])
+        ssh_pass = os.environ["dbsshpassword"]
+        with SSHTunnelForwarder(
+            (ssh_host, ssh_port),
+            ssh_username=ssh_user,
+            ssh_password=ssh_pass,
+            remote_bind_address=(sql_hostname, sql_port)) as tunnel:
+                sqlEngine = sqlalchemy.create_engine('mysql+pymysql://{0}:{1}@{2}:{3}/{4}'.
+                    format(sql_username, sql_password, sql_hostname, tunnel.local_bind_port, sql_main_database))
+        conn = sqlEngine.connect()
+    endif
     #save gemm performance tests:
     if 'resnet50' in filename or "vit.log" in filename:
         for i in range(1,len(results)+1):

@@ -2,11 +2,7 @@ name: AITemplate_ci
 
 on:
   push:
-    branches:
-      - ci-setup
   pull_request:
-    branches:
-      - ci-setup
 
 jobs:
   build:
