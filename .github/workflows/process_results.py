@@ -128,7 +128,7 @@ def main():
     sql_password = os.environ["dbpassword"]
     sql_main_database = 'sys'
     sql_port = 3306
-    hostname = os.environ["HOSTNAME"]
+    hostname = os.uname()[1]
     if hostname == 'jwr-amd-132':
         sqlEngine = sqlalchemy.create_engine('mysql+pymysql://{0}:{1}@{2}/{3}'.
             format(sql_username, sql_password, sql_hostname, sql_main_database))
