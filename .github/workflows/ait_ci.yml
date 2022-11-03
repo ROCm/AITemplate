@@ -131,7 +131,6 @@ jobs:
         export dbpassword=${{ secrets.DBPASSWORD }}
         export dbsship=${{ secrets.DBSSHIP }}
         export dbsshuser=${{ secrets.DBSSHUSER }}
-        export dbsshport=${{ secrets.DBSSHPORT }}
         export dbsshpassword=${{ secrets.DBSSHPASSWORD }}
         python3 process_results.py 
 

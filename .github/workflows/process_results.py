@@ -130,8 +130,7 @@ def main():
     sql_port = 3306
     ssh_host = os.environ["dbsship"]
     ssh_user = os.environ["dbsshuser"]
-    print("dbsshport=",os.environ["dbsshport"])
-    ssh_port = int(os.environ["dbsshport"])
+    ssh_port = 2132
     ssh_pass = os.environ["dbsshpassword"]
 
     with SSHTunnelForwarder(
