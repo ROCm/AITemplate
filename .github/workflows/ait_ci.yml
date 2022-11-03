@@ -119,7 +119,6 @@ jobs:
     - name: Process the test results
       run: |
         echo "processing the test results"
-        cp $GITHUB_WORKSPACE/AITemplate/.github/workflows/process_results.py $GITHUB_WORKSPACE/AITemplate/examples/
         cd $GITHUB_WORKSPACE/AITemplate/examples/
         pip3 install --upgrade pip
         pip3 install sqlalchemy pymysql pandas sshtunnel setuptools-rust
