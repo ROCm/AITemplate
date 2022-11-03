@@ -123,6 +123,13 @@ jobs:
     - name: Process the test results
       run: |
         echo "processing the test results"
-        #python3 ${{ env.DEVOPS_DIR }}/process_results.py /5AITemplate/examples/01_resnet-50/resnet50.log
-        #python3 ${{ env.DEVOPS_DIR }}/process_results.py /AITemplate/examples/04_vit/vit.log
+        cp $GITHUB_WORKSPACE/AITemplate/.github/workflows/process_results.py $GITHUB_WORKSPACE/AITemplate/examples/
+        cd $GITHUB_WORKSPACE/AITemplate/examples/
+        export dbuser=${{ secrets.DBUSER }}
+        export dbpassword=${{ secrets.DBUSER }}
+        export dbsship=${{ secrets.DBSSHIP }}
+        export dbsshuser=${{ secrets.DBSSHUSER }}
+        export dbsshport=${{ secrets.DBSSHPORT }}
+        export dbsshpassword=${{ secrets.DBSSHPASSWORD }}
+        python3 process_results.py 
 
