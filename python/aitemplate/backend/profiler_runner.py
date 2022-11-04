@@ -92,7 +92,7 @@ def process_task(task: Task) -> None:
             "Failed: [{name}][{algo}]\ncmd:\n{cmd}\nstderr:\n{stderr}".format(
                 name=task._name,
                 algo=task._idx,
-                cmd=task._cmd,
+                cmd=' '.join(task._cmd),
                 stderr=stderr,
             ),
         )
