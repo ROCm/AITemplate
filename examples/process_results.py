@@ -63,9 +63,14 @@ def parse_logfile(files):
               if 'batch_size:' in line:
                  lst=line.split()
                  lst[1]=int(lst[1].replace(',',''))
-                 if lst[1]>init_bs:
+                 if lst[1]>init_bs: #only grab first 9 results for different batch sizes from these tests
                     init_bs=lst[1]
                     res.append(lst[3])
+       if 'bert.log' in logfile:
+           for line in open(logfile):
+              if 'batch_size:' in line: #grab all 45 results from these tests
+                 lst=line.split()
+                 res.append(lst[5])
     return res
 
 def get_baseline(table, connection):
