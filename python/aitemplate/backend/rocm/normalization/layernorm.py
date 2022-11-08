@@ -65,10 +65,15 @@ SHAPE_EVAL_TEMPLATE = jinja2.Template(
 EXEC_TEMPLATE = jinja2.Template(
     """
     std::vector<ck::index_t> i_inStrides;
+    std::vector<ck::index_t> i_outStrides;
 
-    i_inStrides.push_back(N);
-    i_inStrides.push_back(1);
+    {% for stride in input_strides %}
+        i_inStrides.push_back({{stride}});
+    {% endfor %}
 
+    {% for stride in output_strides %}
+        i_outStrides.push_back({{stride}});
+    {% endfor %}
 
     auto device_instance = {{instance}}{};
     auto argument_ptr = device_instance.MakeArgumentPointer(
@@ -76,13 +81,13 @@ EXEC_TEMPLATE = jinja2.Template(
         i_inStrides,
         std::vector<ck::index_t>{0, 1},
         std::vector<ck::index_t>{0, 1},
-        i_inStrides,
+        i_outStrides,
         {1},
         {{eps}},
-        static_cast<ck::half_t *>(input),
+        static_cast<ck::half_t *>(input) + {{input_offset}},
         static_cast<ck::half_t *>(gamma),
         static_cast<ck::half_t *>(beta),
-        static_cast<ck::half_t *>(output),
+        static_cast<ck::half_t *>(output) + {{output_offset}},
         ck::tensor_operation::element_wise::PassThrough{}
     );
 
@@ -235,6 +240,16 @@ def gen_function(
     """
     rank = func_attrs["inputs"][0]._rank()
     eps = func_attrs.get("eps", "1e-5")
+    input_accessor = func_attrs["input_accessors"][0]
+    output_accessor = func_attrs["output_accessors"][0]
+    input_strides = []
+    output_strides = []
+    for i, _ in enumerate(input_accessor.original_shapes):
+        input_strides.append(input_accessor.stride(i))
+        output_strides.append(output_accessor.stride(i))
+
+    input_offset = input_accessor.offset
+    output_offset = output_accessor.offset
 
     exec_path = func_attrs["exec_path"]
     op_instance = func_attrs["op_instance"]
@@ -264,7 +279,7 @@ def gen_function(
     for key, _ in instances.items():
         fname = "f" + sha1(key.encode()).hexdigest()
         program = exec_template.render(
-            instance=fname, dtype="void", reduce_dims=rank - 1, eps=eps
+            instance=fname, dtype="void", reduce_dims=rank - 1, eps=eps, input_strides=input_strides, output_strides=output_strides, input_offset=input_offset, output_offset=output_offset
         )
         exec_inst = exec_cond_template.render(indent="  ", cond=key, program=program)
         exec_paths += exec_inst
@@ -346,14 +361,6 @@ def layernorm_gen_function_call(func_attrs, indent="  "):
     ), f"LayerNorm only supports input with rank >= 2, current rank: {len(shapes)}"
 
     input_dim_names = [shape._attrs["name"] for shape in shapes]
-    x = func_attrs["inputs"][0]
-    xshape = x._attrs["shape"]
-
-    elem_cnt = 1
-    for shape in xshape:
-        elem_cnt *= shape._attrs["values"][0]
-    instance_size = xshape[-1]._attrs["values"][0]
-    instance_num = elem_cnt // instance_size
 
     return FUNC_CALL_TEMPLATE.render(
         func_name=func_attrs["name"],
@@ -361,8 +368,6 @@ def layernorm_gen_function_call(func_attrs, indent="  "):
         gamma=gamma_name,
         beta=beta_name,
         output=output_name,
-        M=instance_num,
-        N=instance_size,
         input_dim_names=input_dim_names,
         indent=indent,
     )
