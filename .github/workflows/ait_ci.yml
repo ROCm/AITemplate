@@ -74,21 +74,21 @@ jobs:
         ## BERT
     - name: Run BERT Tests
       run: |
-        echo "BERT tests are temporarily disabled while using MI100"
+        echo "Running BERT tests"
         cd $GITHUB_WORKSPACE/AITemplate/examples/03_bert
         # populate log headers
-        #
+        export GIT_BRANCH=${GITHUB_BASE_REF:-${GITHUB_REF#refs/heads/}}
+        echo -n "hostname: ">bert.log; hostname >> bert.log
+        echo -n "GPU_arch: " >> bert.log; rocminfo | grep "Name:" | grep "gfx" >> bert.log
+        rocminfo | grep "Compute Unit:" >> bert.log
+        echo "git_branch: $GIT_BRANCH" >> bert.log
+        git show --summary | grep commit >> bert.log
+        /opt/rocm/bin/amdclang++ --version | grep -e 'InstalledDir' >> bert.log
         # profiling
-        #HIP_VISIBLE_DEVICES=0,1 python3 benchmark_ait.py 2>&1 | tee bert.log
-        # # test 2 gcd
-        #for SEQ_LENGTH in 64 128 384 1024 4096
-        #do
-        #for BATCH_SIZE in 1 2 4 8 16 32 64 128 256
-        #do
-        #    HIP_VISIBLE_DEVICES=0 python3 benchmark_ait.py --batch-size $BATCH_SIZE --seq-length $SEQ_LENGTH 2>&1 | tee -a bert.log &
-        #    HIP_VISIBLE_DEVICES=1 python3 benchmark_ait.py --batch-size $BATCH_SIZE --seq-length $SEQ_LENGTH 2>&1 | tee -a bert.log
-        #done
-        #done
+        for sq in 64 128 384 512 1024
+        do
+           HIP_VISIBLE_DEVICES=0,1 python3 benchmark_ait.py --seq-length $sq 2>&1 | tee -a bert.log
+        done
         # VIT
     - name: Run VIT Tests
       run: |
