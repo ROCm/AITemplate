@@ -25,6 +25,15 @@ import jinja2
 from ...common import gemm_common
 from ...target import Target
 
+INPUT_ADDR_CALCULATOR = jinja2.Template(
+    """
+  stride_a = {{accessor_a.stride(1)}};
+  offset_a = {{accessor_a.offset}}; // default to 0
+  stride_b = {{accessor_b.stride(1)}};
+  offset_b = {{accessor_b.offset}}; // default to 0
+    """
+)
+
 # pylint: disable=C0103,C0415,W0611,C0301
 OUTPUT_ADDR_CALCULATOR = jinja2.Template(
     """
@@ -37,8 +46,8 @@ OUTPUT_ADDR_CALCULATOR = jinja2.Template(
 
 EXTRA_SHAPE_TEMPLATE = jinja2.Template(
     """
-{{indent}}const int64_t stride_a = *a_dim1;
-{{indent}}const int64_t stride_b = *b_dim1;
+{{indent}}int64_t stride_a = *a_dim1;
+{{indent}}int64_t stride_b = *b_dim1;
 {{indent}}const int64_t stride_c = *c_dim1;
 {{indent}}int64_t output_stride = stride_c;
 """
@@ -144,6 +153,8 @@ void {{function_name}}(
     hipStream_t stream
     ) {
   {{shape_func}}
+  int64_t offset_a = 0;
+  int64_t offset_b = 0;
   int64_t output_offset = 0;
   {{extra_shape}}
   {{input_addr_calculator}}
@@ -192,8 +203,8 @@ FUNC_CALL_TEMPLATE = jinja2.Template(
 
 PROBLEM_ARGS_TEMPLATE = jinja2.Template(
     """
-{{indent}}                                static_cast<ck::half_t *>(in_ptr),
-{{indent}}                                static_cast<ck::half_t *>(weight_ptr),
+{{indent}}                                static_cast<ck::half_t *>(in_ptr) + offset_a,
+{{indent}}                                static_cast<ck::half_t *>(weight_ptr) + offset_b,
 
 {% if gemm_flag == "bias_permute" %}
 {{indent}}                                static_cast<ck::half_t *>(bias_ptr),
