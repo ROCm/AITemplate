@@ -60,7 +60,7 @@ class StableDiffusionAITPipeline(StableDiffusionPipeline):
             [`DDIMScheduler`], [`LMSDiscreteScheduler`], or [`PNDMScheduler`].
         safety_checker ([`StableDiffusionSafetyChecker`]):
             Classification module that estimates whether generated images could be considered offsensive or harmful.
-            Please, refer to the [model card](https://huggingface.co/CompVis/stable-diffusion-v1-4) for details.
+            Please, refer to the [model card](https://huggingface.co/runwayml/stable-diffusion-v1-5) for details.
         feature_extractor ([`CLIPFeatureExtractor`]):
             Model that extracts features from generated images to be used as inputs for the `safety_checker`.
     """
@@ -120,7 +120,7 @@ class StableDiffusionAITPipeline(StableDiffusionPipeline):
         for i in range(num_ouputs):
             shape = exe_module.get_output_maximum_shape(i)
             ys.append(torch.empty(shape).cuda().half())
-        exe_module.run_with_tensors(inputs, ys, graph_mode=True)
+        exe_module.run_with_tensors(inputs, ys, graph_mode=False)
         noise_pred = ys[0].permute((0, 3, 1, 2)).float()
         return noise_pred
 
@@ -137,7 +137,7 @@ class StableDiffusionAITPipeline(StableDiffusionPipeline):
         for i in range(num_ouputs):
             shape = exe_module.get_output_maximum_shape(i)
             ys.append(torch.empty(shape).cuda().half())
-        exe_module.run_with_tensors(inputs, ys, graph_mode=True)
+        exe_module.run_with_tensors(inputs, ys, graph_mode=False)
         return ys[0].float()
 
     def vae_inference(self, vae_input):
@@ -148,7 +148,7 @@ class StableDiffusionAITPipeline(StableDiffusionPipeline):
         for i in range(num_ouputs):
             shape = exe_module.get_output_maximum_shape(i)
             ys.append(torch.empty(shape).cuda().half())
-        exe_module.run_with_tensors(inputs, ys, graph_mode=True)
+        exe_module.run_with_tensors(inputs, ys, graph_mode=False)
         vae_out = ys[0].permute((0, 3, 1, 2)).float()
         return vae_out
 
