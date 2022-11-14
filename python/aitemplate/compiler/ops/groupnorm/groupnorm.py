@@ -350,7 +350,7 @@ class group_norm(Operator):
             target=target.name(), op=self._attrs["op"]
         )
         func = registry.get(func_key)
-        func(self._attrs, workdir)
+        return func(self._attrs, workdir)
 
     def _extract_exec_path(self, dynamic_profiling_strategy=DynamicProfileStrategy.MAX):
         """Extract execution key, i.e. input arguments for the profiler.

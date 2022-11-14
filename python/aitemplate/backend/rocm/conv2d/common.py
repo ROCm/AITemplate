@@ -461,8 +461,9 @@ int main(int argc, char** argv) {
     {{func_call}}
   }
   timer->End();
-  std::cout << "WS:" <<GLOBAL_WORKSPACE_SIZE<<std::endl;
-  std::cout << "TIME:" << timer->GetElapsedTime() << std::endl;
+  std::cout << "OP:" << "{{op_name}}" << ",";
+  std::cout << "TIME:" << timer->GetElapsedTime() << ",";
+  std::cout << "WS:" << GLOBAL_WORKSPACE_SIZE << std::endl;
   delete(timer);
 }
 """
@@ -662,6 +663,7 @@ def gen_profiler(
             args_parse=args_parse,
             tensor_decl=tensor_decl,
             func_call=func_call,
+            op_name=op_name
         )
         prefix = os.path.join(workdir, "profiler", op_type)
         if not os.path.exists(prefix):

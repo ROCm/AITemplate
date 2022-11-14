@@ -344,9 +344,13 @@ clean:
         )
         logger.info(__name__, f"compiling {len(program_relative_paths)} profiler srcs")
         programs = " ".join(program_relative_paths)
+        cc = Target.current().cc()
+        cpp = "cpp"
+        if "nvcc" in cc:
+            cpp = "cu"
         cc_cmd = Target.current().compile_cmd(True).format(target="$@", src="$<")
         makefile_str = makefile_template.render(
-            cpp="cu",
+            cpp=cpp,
             programs=programs,
             cc_cmd=cc_cmd,
         )

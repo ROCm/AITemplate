@@ -367,7 +367,7 @@ class softmax(Operator):
             target=target.name(), op=self._attrs["op"]
         )
         func = registry.get(func_key)
-        func(self._attrs, workdir)
+        return func(self._attrs, workdir)
 
     def gen_function(self) -> str:
         """Generate function body.

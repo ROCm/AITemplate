@@ -65,7 +65,7 @@ def extract_profile_result(stdout) -> Tuple[ProfileResult, bool]:
             duration = float(RUNTIME_PATTERN.findall(stdout)[0])
             workspace = int(WORKSPACE_PATTERN.findall(stdout)[0])
     except Exception:
-        duration = 0
+        duration = float("inf")
         workspace = 0
         failed = True
     return ProfileResult(op_config, duration, workspace), failed
@@ -237,11 +237,12 @@ class ProfilerRunner:
         # some time after a future holding profiler result completes
         def callback_when_done(fut):
             try:
+                stdout, stderr = '', ''
                 stdout, stderr = fut.result()
                 profile_result, err = extract_profile_result(stdout)
                 if err:
-                    logger.error(
-                        f"Profiler failure!\nProfiler stdout: {stdout}\nProfiler stderr: {stderr}"
+                    logger.warning(
+                        __name__, f"Profiler failure!\nProfiler stdout: {stdout}\nProfiler stderr: {stderr}"
                     )
                     raise RuntimeError(f"Failed to extract profiler result for {cmds}")
                 process_result_callback(profile_result, self._postprocessing_delegate)
