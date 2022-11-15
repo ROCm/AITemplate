@@ -504,7 +504,7 @@ class gemm(Operator):
                 target=target.name(), op=self._attrs["op"]
             )
             func = registry.get(func_key)
-            if target.name() == 'rocm':
+            if target.name() == "rocm":
                 return func(
                     self._attrs,
                     workdir,
@@ -626,7 +626,7 @@ class gemm(Operator):
                 f"{op_type} {exec_entry_sha1}.\n",
                 "To bypass, you need to make it available in the db table.",
             )
-        if target.name() == 'rocm':
+        if target.name() == "rocm":
             op_type = self._attrs["op"]
             all_op_names = list(self._attrs["op_instance"].keys())
             for op_name in all_op_names:
