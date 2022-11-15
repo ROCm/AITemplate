@@ -19,7 +19,6 @@ import os
 import re
 from collections import OrderedDict
 from hashlib import sha1
-from operator import itemgetter
 from typing import Any, List, Union
 
 import jinja2
@@ -334,7 +333,7 @@ class layernorm(Operator):
                 "Profile workload: " f"{exec_key}" " failed. " f"Results: {result}."
             )
 
-        out = min(result, key=itemgetter(1))
+        out = min(result, key=lambda x: x[1].duration)
         best_algo = out[0]
         workspace = out[1].workspace
         ## cache

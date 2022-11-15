@@ -89,9 +89,9 @@ EXEC_TEMPLATE = jinja2.Template(
 {{problem_args}}
 {{indent}});
 {{indent}}if(!op.IsSupportedArgument(argument)) {
-{{indent}}  throw std::runtime_error(
-{{indent}}    "wrong! device_conv with the specified compilation parameters does "
-{{indent}}    "not support this Conv problem");
+{{indent}}  auto ss = std::stringstream();
+{{indent}}  ss << "wrong! " << op.GetTypeString() << " with the specified compilation parameters does not support this Conv problem.";
+{{indent}}  throw std::runtime_error(ss.str());
 {{indent}}}
 {% if is_profiler %}
 {{indent}}auto workspace_size = op.GetWorkSpaceSize(&argument);
