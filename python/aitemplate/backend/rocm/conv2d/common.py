@@ -663,7 +663,7 @@ def gen_profiler(
             args_parse=args_parse,
             tensor_decl=tensor_decl,
             func_call=func_call,
-            op_name=op_name
+            op_name=op_name,
         )
         prefix = os.path.join(workdir, "profiler", op_type)
         if not os.path.exists(prefix):

@@ -630,6 +630,7 @@ class gemm(Operator):
             op_type = self._attrs["op"]
             all_op_names = list(self._attrs["op_instance"].keys())
             for op_name in all_op_names:
+
                 def _gen_callback(split_k):
                     def process_result_callback(result, postprocessing_delegate):
                         postprocessing_delegate.add_instance(
@@ -637,10 +638,11 @@ class gemm(Operator):
                         )
 
                     return process_result_callback
+
                 command = self._gen_profile_cmd(profiler_prefix, op_name, exec_key)
-                if self._attrs["op"].startswith("group_gemm") or self._attrs["op"].startswith(
-                    "bmm"
-                ):
+                if self._attrs["op"].startswith("group_gemm") or self._attrs[
+                    "op"
+                ].startswith("bmm"):
                     profiler_runner.push(command, _gen_callback(split_k=1))
                 else:
                     m, n, k = gemm_inverse_key_func(exec_key)[-3:]
@@ -662,11 +664,13 @@ class gemm(Operator):
 
                 return process_result_callback
 
-            command = self._gen_profile_cmd(profiler_prefix, profiler_filename, exec_key)
+            command = self._gen_profile_cmd(
+                profiler_prefix, profiler_filename, exec_key
+            )
 
-            if self._attrs["op"].startswith("group_gemm") or self._attrs["op"].startswith(
-                "bmm"
-            ):
+            if self._attrs["op"].startswith("group_gemm") or self._attrs[
+                "op"
+            ].startswith("bmm"):
                 profiler_runner.push(command, _gen_callback(split_k=1))
             else:
                 m, n, k = gemm_inverse_key_func(exec_key)[-3:]

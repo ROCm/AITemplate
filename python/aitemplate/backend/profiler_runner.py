@@ -237,12 +237,13 @@ class ProfilerRunner:
         # some time after a future holding profiler result completes
         def callback_when_done(fut):
             try:
-                stdout, stderr = '', ''
+                stdout, stderr = "", ""
                 stdout, stderr = fut.result()
                 profile_result, err = extract_profile_result(stdout)
                 if err:
                     logger.warning(
-                        __name__, f"Profiler failure!\nProfiler stdout: {stdout}\nProfiler stderr: {stderr}"
+                        __name__,
+                        f"Profiler failure!\nProfiler stdout: {stdout}\nProfiler stderr: {stderr}",
                     )
                     raise RuntimeError(f"Failed to extract profiler result for {cmds}")
                 process_result_callback(profile_result, self._postprocessing_delegate)
