@@ -23,11 +23,12 @@ from pipeline_stable_diffusion_ait import StableDiffusionAITPipeline
 @click.option("--token", default="", help="access token")
 @click.option("--width", default=512, help="Width of generated image")
 @click.option("--height", default=512, help="Height of generated image")
+@click.option("--batch-size", default=1, help="batch size")
 @click.option("--prompt", default="A vision of paradise, Unreal Engine", help="prompt")
 @click.option(
     "--benchmark", type=bool, default=False, help="run stable diffusion e2e benchmark"
 )
-def run(token, width, height, prompt, benchmark):
+def run(token, width, height, batch_size, prompt, benchmark):
     pipe = StableDiffusionAITPipeline.from_pretrained(
         "runwayml/stable-diffusion-v1-5",
         revision="fp16",

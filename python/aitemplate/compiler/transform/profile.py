@@ -21,6 +21,7 @@ from datetime import datetime
 from typing import List, OrderedDict
 
 from aitemplate.backend.profiler_runner import ProfilerRunner
+from aitemplate.backend.target import Target
 
 from aitemplate.compiler.ops.gemm_universal.gemm_common import (
     gemm,
@@ -105,9 +106,10 @@ def profile(
             devices=devices,
             dynamic_profiling_strategy=dynamic_profiling_strategy,
         )
+    timeout = 360 if Target.current().name() == "rocm" else 180
     profiler_runner = ProfilerRunner(
         devices,
-        timeout=180,
+        timeout=timeout,
         postprocessing_delegate=GemmProfilerPostprocessingDelegate(),
     )
     for f in gemms:
