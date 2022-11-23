@@ -71,7 +71,7 @@ EXEC_TEMPLATE = jinja2.Template(
 
 
     auto device_instance = {{instance}}{};
-    auto argument = device_instance.MakeArgument(
+    auto argument_ptr = device_instance.MakeArgumentPointer(
         {M, N},
         i_inStrides,
         std::vector<ck::index_t>{0, 1},
@@ -86,12 +86,12 @@ EXEC_TEMPLATE = jinja2.Template(
         ck::tensor_operation::element_wise::PassThrough{}
     );
 
-    if(!device_instance.IsSupportedArgument(argument))
+    if(!device_instance.IsSupportedArgument(argument_ptr.get()))
     {
         LOG(FATAL) << "wrong! " << device_instance.GetTypeString() << " with the specified compilation parameters does not support this Layernorm problem.";
     };
-    auto invoker = device_instance.MakeInvoker();
-    invoker.Run(argument, StreamConfig{stream, false});
+    auto invoker_ptr = device_instance.MakeInvokerPointer();
+    invoker_ptr->Run(argument_ptr.get(), StreamConfig{stream, false});
     return;
 """
 )
