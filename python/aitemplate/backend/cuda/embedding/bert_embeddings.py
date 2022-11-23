@@ -21,7 +21,6 @@ from typing import Any, Dict
 import jinja2
 
 from ... import registry
-from ...backend_spec import CUDASpec
 
 # pylint: disable=C0301
 
@@ -53,7 +52,6 @@ __inline__ __device__ T blockReduceSum(T* val) {
   warpReduceSum<T>(val);
 
   if (lane == 0) {
-#pragma unroll
     shared[wid] = val[0];
   }
 
@@ -61,7 +59,6 @@ __inline__ __device__ T blockReduceSum(T* val) {
 
   // blockDim.x is round up to multiples of 32
   bool is_mask = threadIdx.x < (blockDim.x / 32);
-#pragma unroll
   val[0] = is_mask ? shared[lane] : (T)(0.0f);
 
   warpReduceSum<T>(val);
@@ -82,7 +79,7 @@ __inline__ __device__ float sigmoid(float val) {
   return (cutlass::fast_tanh(val * 0.5f) + 1.0f) * 0.5f;
 }
 
-template <typename ElemT, typename INDEX_T>
+template <typename INDEX_T>
 __global__ void bert_embeddings_kernel(
     uint4* output,
     INDEX_T* input_ids,
@@ -98,10 +95,9 @@ __global__ void bert_embeddings_kernel(
     const int64_t type_vocab_size,
     const int64_t max_position_embeddings,
     const float eps) {
-  constexpr int num_elems_in_uint4 = sizeof(uint4) / sizeof(ElemT);
   const int tid = threadIdx.x;
   const int bid = blockIdx.x;
-  const int embedding_dim_div_n = embedding_dim / num_elems_in_uint4;
+  const int embedding_dim_div_8 = embedding_dim / 8;
 
   const int64_t input_id = input_ids[bid];
   const int64_t token_type_id = token_type_ids[bid];
@@ -114,37 +110,37 @@ __global__ void bert_embeddings_kernel(
     return;
   }
 
-  word_embeddings = word_embeddings + input_id * embedding_dim_div_n;
+  word_embeddings = word_embeddings + input_id * embedding_dim_div_8;
   token_type_embeddings =
-      token_type_embeddings + token_type_id * embedding_dim_div_n;
-  position_embeddings = position_embeddings + position_id * embedding_dim_div_n;
+      token_type_embeddings + token_type_id * embedding_dim_div_8;
+  position_embeddings = position_embeddings + position_id * embedding_dim_div_8;
 
   uint4 word_embedding{0, 0, 0, 0};
   uint4 token_type_embedding{0, 0, 0, 0};
   uint4 position_embedding{0, 0, 0, 0};
 
-  if (tid < embedding_dim_div_n) {
+  if (tid < embedding_dim_div_8) {
     word_embedding = word_embeddings[tid];
     token_type_embedding = token_type_embeddings[tid];
     position_embedding = position_embeddings[tid];
   }
   uint4 embedding{0, 0, 0, 0};
 
-  ElemT* word_emb_vec = reinterpret_cast<ElemT*>(&word_embedding);
-  ElemT* token_emb_vec = reinterpret_cast<ElemT*>(&token_type_embedding);
-  ElemT* pos_emb_vec = reinterpret_cast<ElemT*>(&position_embedding);
+  half* word_emb_vec = reinterpret_cast<half*>(&word_embedding);
+  half* token_emb_vec = reinterpret_cast<half*>(&token_type_embedding);
+  half* pos_emb_vec = reinterpret_cast<half*>(&position_embedding);
 
-  ElemT* emb_vec = reinterpret_cast<ElemT*>(&embedding);
+  half* emb_vec = reinterpret_cast<half*>(&embedding);
 
   // layernorm
   __shared__ float s_mean, s_variance;
   float local_sums[1] = {0.0f};
 
 #pragma unroll
-  for (int i = 0; i < num_elems_in_uint4; i++) {
+  for (int i = 0; i < 8; i++) {
     float sum = word_emb_vec[i] + token_emb_vec[i] + pos_emb_vec[i];
     local_sums[0] += sum;
-    emb_vec[i] = static_cast<ElemT>(sum);
+    emb_vec[i] = (half)sum;
   }
 
   if (blockDim.x <= 32) {
@@ -159,9 +155,9 @@ __global__ void bert_embeddings_kernel(
 
   local_sums[0] = 0.0f;
 
-  if (tid < embedding_dim_div_n) {
+  if (tid < embedding_dim_div_8) {
 #pragma unroll
-    for (int i = 0; i < num_elems_in_uint4; i++) {
+    for (int i = 0; i < 8; i++) {
       float val = emb_vec[i];
       local_sums[0] += (val - s_mean) * (val - s_mean);
     }
@@ -177,13 +173,13 @@ __global__ void bert_embeddings_kernel(
   }
   __syncthreads();
 
-  if (tid < embedding_dim_div_n) {
+  if (tid < embedding_dim_div_8) {
     uint4 local_gamma = gamma[tid];
-    ElemT* gamma_vec = reinterpret_cast<ElemT*>(&local_gamma);
+    half* gamma_vec = reinterpret_cast<half*>(&local_gamma);
     uint4 local_beta = beta[tid];
-    ElemT* beta_vec = reinterpret_cast<ElemT*>(&local_beta);
+    half* beta_vec = reinterpret_cast<half*>(&local_beta);
 #pragma unroll
-    for (int i = 0; i < num_elems_in_uint4; i++) {
+    for (int i = 0; i < 8; i++) {
       emb_vec[i] = normalize(
           (float)emb_vec[i],
           s_mean,
@@ -194,23 +190,23 @@ __global__ void bert_embeddings_kernel(
   }
 
   // write to output
-  if (tid < embedding_dim_div_n) {
-    output = output + bid * embedding_dim_div_n;
+  if (tid < embedding_dim_div_8) {
+    output = output + bid * embedding_dim_div_8;
     output[tid] = embedding;
   }
 }
 
-template <typename ElemT, typename INDEX_T>
+template <typename INDEX_T>
 void bert_embeddings_launcher(
-    ElemT* output,
+    half* output,
     INDEX_T* input_ids,
     INDEX_T* token_type_ids,
     INDEX_T* position_ids,
-    ElemT* word_embeddings,
-    ElemT* token_type_embeddings,
-    ElemT* position_embeddings,
-    ElemT* gamma,
-    ElemT* beta,
+    half* word_embeddings,
+    half* token_type_embeddings,
+    half* position_embeddings,
+    half* gamma,
+    half* beta,
     const int64_t indices_num,
     const int64_t embedding_dim,
     const int64_t vocab_size,
@@ -218,21 +214,17 @@ void bert_embeddings_launcher(
     const int64_t max_position_embeddings,
     const float eps,
     cudaStream_t stream) {
-  constexpr int num_elems_in_uint4 = sizeof(uint4) / sizeof(ElemT);
-  if (embedding_dim % num_elems_in_uint4 != 0) {
-    throw std::runtime_error(
-        "embedding dim must be multiple of num_elems_in_uint4: " +
-        std::to_string(num_elems_in_uint4)
-    );
+  if (embedding_dim % 8 != 0) {
+    throw std::runtime_error("embedding dim must be multiple of 8");
   }
   dim3 grid(indices_num);
 
   // round up to multiple of 32
-  int64_t num_threads = embedding_dim / num_elems_in_uint4;
+  int64_t num_threads = embedding_dim / 8;
   num_threads = (num_threads + 31) / 32 * 32;
   dim3 block(num_threads);
 
-  bert_embeddings_kernel<{{elem_input_type}}, INDEX_T><<<grid, block, 0, stream>>>(
+  bert_embeddings_kernel<INDEX_T><<<grid, block, 0, stream>>>(
       reinterpret_cast<uint4*>(output),
       input_ids,
       token_type_ids,
@@ -253,16 +245,16 @@ void bert_embeddings_launcher(
 
 {{func_signature}}
 {
-    bert_embeddings_launcher<{{elem_input_type}}, {{index_type}}>(
-      static_cast<{{elem_input_type}}*>(output),
+    bert_embeddings_launcher<{{index_type}}>(
+      output,
       input_ids,
       token_type_ids,
       position_ids,
-      static_cast<{{elem_input_type}}*>(word_embeddings),
-      static_cast<{{elem_input_type}}*>(token_type_embeddings),
-      static_cast<{{elem_input_type}}*>(position_embeddings),
-      static_cast<{{elem_input_type}}*>(gamma),
-      static_cast<{{elem_input_type}}*>(beta),
+      word_embeddings,
+      token_type_embeddings,
+      position_embeddings,
+      gamma,
+      beta,
       indices_num,
       embedding_dim,
       vocab_size,
@@ -278,15 +270,15 @@ void bert_embeddings_launcher(
 
 FUNC_SIGNATURE = jinja2.Template(
     """
-void {{func_name}}(void* output,
+void {{func_name}}(half* output,
                    {{index_type}}* input_ids,
                    {{index_type}}* token_type_ids,
                    {{index_type}}* position_ids,
-                   void* word_embeddings,
-                   void* token_type_embeddings,
-                   void* position_embeddings,
-                   void* gamma,
-                   void* beta,
+                   half* word_embeddings,
+                   half* token_type_embeddings,
+                   half* position_embeddings,
+                   half* gamma,
+                   half* beta,
                    const int64_t indices_num,
                    const int64_t embedding_dim,
                    const int64_t vocab_size,
@@ -350,14 +342,9 @@ def python_int_dtype_to_c_dtype(dtype):
 
 @registry.reg("cuda.bert_embeddings.gen_function")
 def bert_embeddings_gen_function(func_attrs: Dict[str, Any]) -> str:
-    backend_spec = CUDASpec()
-    elem_input_type = backend_spec.dtype_to_backend_type(
-        func_attrs["inputs"][3]._attrs["dtype"]
-    )
     dtype = python_int_dtype_to_c_dtype(func_attrs["inputs"][0]._attrs["dtype"])
     return FUNC_TEMPLATE.render(
         index_type=dtype,
-        elem_input_type=elem_input_type,
         func_signature=FUNC_SIGNATURE.render(
             func_name=func_attrs["name"],
             index_type=dtype,
@@ -375,6 +362,10 @@ def bert_embeddings_gen_function_decl(func_attrs: Dict[str, Any]) -> str:
         ).strip()
     )
 
+
+FUNC_CALL_FP16_PARAM_TEMPLATE = jinja2.Template(
+    "reinterpret_cast<half*>(&({{name}}->raw()))"
+)
 
 FUNC_CALL_INT64_PARAM_TEMPLATE = jinja2.Template("reinterpret_cast<int64_t*>({{name}})")
 FUNC_CALL_INT32_PARAM_TEMPLATE = jinja2.Template("reinterpret_cast<int32_t*>({{name}})")
@@ -414,18 +405,26 @@ def bert_embeddings_gen_function_call(func_attrs: Dict[str, Any], indent="  ") -
     max_position_embeddings = position_embeddings._size(0).value()
 
     eps = func_attrs["eps"]
-    output_str = func_attrs["outputs"][0]._attrs["name"]
+    output_str = FUNC_CALL_FP16_PARAM_TEMPLATE.render(
+        name=func_attrs["outputs"][0]._attrs["name"]
+    )
 
     input_ids_str = get_int_param_template(input_ids)
     token_type_ids_str = get_int_param_template(token_type_ids)
     position_ids_str = get_int_param_template(position_ids)
 
-    word_embeddings_str = word_embeddings._attrs["name"]
-    token_type_embeddings_str = token_type_embeddings._attrs["name"]
-    position_embeddings_str = position_embeddings._attrs["name"]
+    word_embeddings_str = FUNC_CALL_FP16_PARAM_TEMPLATE.render(
+        name=word_embeddings._attrs["name"]
+    )
+    token_type_embeddings_str = FUNC_CALL_FP16_PARAM_TEMPLATE.render(
+        name=token_type_embeddings._attrs["name"]
+    )
+    position_embeddings_str = FUNC_CALL_FP16_PARAM_TEMPLATE.render(
+        name=position_embeddings._attrs["name"]
+    )
 
-    gamma_str = gamma._attrs["name"]
-    beta_str = beta._attrs["name"]
+    gamma_str = FUNC_CALL_FP16_PARAM_TEMPLATE.render(name=gamma._attrs["name"])
+    beta_str = FUNC_CALL_FP16_PARAM_TEMPLATE.render(name=beta._attrs["name"])
 
     return FUNC_CALL_TEMPLATE.render(
         func_name=func_attrs["name"],

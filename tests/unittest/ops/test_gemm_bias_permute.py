@@ -22,8 +22,8 @@ from aitemplate.testing import detect_target
 
 
 @unittest.skipIf(detect_target().name() == "cuda", "Not supported by CUDA.")
-class GEMMBiasPermuteTestCase(unittest.TestCase):
-    def _test_gemm_rcr_bias_permute_m2n3(self, copy_op=False):
+class GEMMTestCase(unittest.TestCase):
+    def test_gemm_rcr_bias_permute_m2n3(self):
         M0 = 4
         M1 = 256
         N0 = 4
@@ -38,8 +38,6 @@ class GEMMBiasPermuteTestCase(unittest.TestCase):
         W = Tensor(shape=[N, K], dtype="float16", name="input_1", is_input=True)
         B = Tensor(shape=[N], dtype="float16", name="input_2", is_input=True)
         OP = ops.gemm_rcr_bias_permute(shape, layout="m2n3")
-        if copy_op:
-            OP = ops.gemm_rcr_bias_permute(**OP._get_op_attributes())
         Y = OP(X, W, B)
         Y._attrs["name"] = "output_0"
         Y._attrs["is_output"] = True
@@ -58,11 +56,7 @@ class GEMMBiasPermuteTestCase(unittest.TestCase):
 
         self.assertTrue(torch.allclose(Y_pt, y, atol=1e-1, rtol=1e-1))
 
-    def test_gemm_rcr_bias_permute_m2n3(self):
-        self._test_gemm_rcr_bias_permute_m2n3()
-        self._test_gemm_rcr_bias_permute_m2n3(copy_op=True)
-
-    def _test_gemm_rcr_bias_permute_m3n2(self, copy_op=False):
+    def test_gemm_rcr_bias_permute_m3n2(self):
         M0 = 4
         M1 = 16
         M2 = 32
@@ -77,8 +71,6 @@ class GEMMBiasPermuteTestCase(unittest.TestCase):
         W = Tensor(shape=[N, K], dtype="float16", name="input_1", is_input=True)
         B = Tensor(shape=[N], dtype="float16", name="input_2", is_input=True)
         OP = ops.gemm_rcr_bias_permute(shape, layout="m3n2")
-        if copy_op:
-            OP = ops.gemm_rcr_bias_permute(**OP._get_op_attributes())
         Y = OP(X, W, B)
         Y._attrs["name"] = "output_0"
         Y._attrs["is_output"] = True
@@ -96,11 +88,7 @@ class GEMMBiasPermuteTestCase(unittest.TestCase):
 
         self.assertTrue(torch.allclose(Y_pt, y, atol=1e-1, rtol=1e-1))
 
-    def test_gemm_rcr_bias_permute_m3n2(self):
-        self._test_gemm_rcr_bias_permute_m3n2()
-        self._test_gemm_rcr_bias_permute_m3n2(copy_op=True)
-
-    def _test_gemm_rcr_permute_m2n3(self, copy_op=False):
+    def test_gemm_rcr_permute_m2n3(self):
         M0 = 4
         M1 = 256
         N0 = 4
@@ -114,8 +102,6 @@ class GEMMBiasPermuteTestCase(unittest.TestCase):
         X = Tensor(shape=[M, K], dtype="float16", name="input_0", is_input=True)
         W = Tensor(shape=[N, K], dtype="float16", name="input_1", is_input=True)
         OP = ops.gemm_rcr_permute(shape, layout="m2n3")
-        if copy_op:
-            OP = ops.gemm_rcr_permute(**OP._get_op_attributes())
         Y = OP(X, W)
         Y._attrs["name"] = "output_0"
         Y._attrs["is_output"] = True
@@ -132,10 +118,6 @@ class GEMMBiasPermuteTestCase(unittest.TestCase):
         module.run_with_tensors(inputs, [y])
 
         self.assertTrue(torch.allclose(Y_pt, y, atol=1e-1, rtol=1e-1))
-
-    def test_gemm_rcr_permute_m2n3(self):
-        self._test_gemm_rcr_permute_m2n3()
-        self._test_gemm_rcr_permute_m2n3(copy_op=True)
 
     # ========== enable them after fix profiler =========
     # def test_gemm_rcr_bias_relu(self):

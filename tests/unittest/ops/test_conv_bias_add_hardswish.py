@@ -27,7 +27,7 @@ def hard_swish(x):
 
 @unittest.skipIf(detect_target().name() == "rocm", "Not supported by ROCM.")
 class ConvBiasHardswishAddTestCase(unittest.TestCase):
-    def _test_fp16(self, batch=4, copy_op=False):
+    def test_fp16(self, batch=4):
         target = detect_target()
         CO, HH, WW, CI = 256, 28, 28, 128
         X = Tensor(
@@ -46,8 +46,6 @@ class ConvBiasHardswishAddTestCase(unittest.TestCase):
             is_input=True,
         )
         OP = ops.conv2d_bias_add_hardswish(stride=1, pad=1, dilate=1)
-        if copy_op:
-            OP = ops.conv2d_bias_add_hardswish(**OP._get_op_attributes())
         Y = OP(X, W, B, R)
         Y._attrs["name"] = "output_0"
         Y._attrs["is_output"] = True
@@ -69,10 +67,6 @@ class ConvBiasHardswishAddTestCase(unittest.TestCase):
         module.run_with_tensors(inputs, [y])
         y_transpose = y.permute(0, 3, 1, 2)
         self.assertTrue(torch.allclose(Y_pt, y_transpose, atol=1e-2, rtol=1e-2))
-
-    def test_fp16(self):
-        self._test_fp16()
-        self._test_fp16(copy_op=True)
 
 
 if __name__ == "__main__":

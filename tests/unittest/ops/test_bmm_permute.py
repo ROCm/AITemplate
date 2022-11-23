@@ -24,8 +24,8 @@ from aitemplate.utils import shape_utils
 
 
 @unittest.skipIf(detect_target().name() == "rocm", "Not supported by ROCM.")
-class BMMPermuteTestCase(unittest.TestCase):
-    def _test_rrr(self, bs, ms, N, K, d1, test_name, copy_op=False):
+class BMMTestCase(unittest.TestCase):
+    def _test_rrr(self, bs, ms, N, K, d1, test_name):
         target = detect_target()
         batch_dim = shape_utils.gen_int_var_min_max(bs, name="batch_size")
         m_dim = shape_utils.gen_int_var_min_max(ms, name="m")
@@ -36,8 +36,6 @@ class BMMPermuteTestCase(unittest.TestCase):
             shape=[batch_dim, K, N], dtype="float16", name="input_1", is_input=True
         )
         OP = ops.bmm_rrr_permute(shape=(d1,))
-        if copy_op:
-            OP = ops.bmm_rrr_permute(**OP._get_op_attributes())
         Y = OP(X, W)
         Y._attrs["name"] = "output_0"
         Y._attrs["is_output"] = True
@@ -62,14 +60,11 @@ class BMMPermuteTestCase(unittest.TestCase):
         self._test_rrr([24], [80], N=88, K=64, d1=12, test_name="permute1")
         self._test_rrr([10240], [88], N=88, K=64, d1=10, test_name="permute2")
         self._test_rrr([100], [88], N=88, K=64, d1=10, test_name="permute3")
-        self._test_rrr(
-            [100], [88], N=88, K=64, d1=10, test_name="permute3_copy_op", copy_op=True
-        )
         if detect_target().name() != "rocm":
             self._test_rrr([24], [80], N=0, K=96, d1=12, test_name="permute1_zero_n")
             self._test_rrr([24], [0], N=32, K=96, d1=12, test_name="permute1_zero_m")
 
-    def _test_rcr(self, bs, ms, N, K, d1, test_name, copy_op=False):
+    def _test_rcr(self, bs, ms, N, K, d1, test_name):
         target = detect_target()
         batch_dim = shape_utils.gen_int_var_min_max(bs, name="batch_size")
         m_dim = shape_utils.gen_int_var_min_max(ms, name="m")
@@ -80,8 +75,6 @@ class BMMPermuteTestCase(unittest.TestCase):
             shape=[batch_dim, N, K], dtype="float16", name="input_1", is_input=True
         )
         OP = ops.bmm_rcr_permute(shape=(d1,))
-        if copy_op:
-            OP = ops.bmm_rcr_permute(**OP._get_op_attributes())
         Y = OP(X, W)
         Y._attrs["name"] = "output_0"
         Y._attrs["is_output"] = True
@@ -107,9 +100,6 @@ class BMMPermuteTestCase(unittest.TestCase):
         self._test_rcr([10240], [88], N=64, K=88, d1=10, test_name="permute1")
         self._test_rcr([24], [80], N=64, K=88, d1=12, test_name="permute2")
         self._test_rcr([100], [88], N=64, K=88, d1=10, test_name="permute3")
-        self._test_rcr(
-            [100], [88], N=64, K=88, d1=10, test_name="permute3_copy_op", copy_op=True
-        )
         if detect_target().name() != "rocm":
             self._test_rcr(
                 [0], [80], N=96, K=32, d1=12, test_name="permute1_zero_batch"

@@ -288,7 +288,7 @@ def benchmark_diffusers(token, batch_size, verify, benchmark_pt):
         access_token = token
 
     pipe = StableDiffusionPipeline.from_pretrained(
-        "runwayml/stable-diffusion-v1-5",
+        "CompVis/stable-diffusion-v1-4",
         revision="fp16",
         torch_dtype=torch.float16,
         use_auth_token=access_token,

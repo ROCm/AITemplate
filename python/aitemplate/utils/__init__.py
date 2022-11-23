@@ -16,7 +16,6 @@
 # flake8: noqa
 
 from . import (
-    alignment,
     graph_utils,
     logger,
     markdown_table,

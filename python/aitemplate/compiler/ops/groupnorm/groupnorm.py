@@ -57,7 +57,6 @@ class group_norm(Operator):
         if detect_target().name() == "rocm":
             self._attrs["has_profiler"] = True
         self._attrs["num_channels"] = num_channels
-        self._attrs["workspace"] = 0
 
     @staticmethod
     def check_shapes(x_shapes, gamma_shapes, beta_shapes, num_groups):
@@ -129,10 +128,8 @@ class group_norm(Operator):
         self._sanity_check(x, gamma, beta)
         self._set_depth()
         output_shape = self._infer_shapes(x)
+        self._extract_exec_path()
         output = Tensor(output_shape, src_ops={self})
-
-        batch_size = output_shape[0]._attrs["values"][-1]
-        self._attrs["workspace"] = 8 * batch_size * self._attrs["num_groups"]
         self._attrs["outputs"] = [output]
         return output
 
@@ -253,14 +250,13 @@ class group_norm(Operator):
         runner.join()
         result = runner.pull()
 
-        if len(result) == 0:
+        out = sorted(result, key=lambda x: x[1])
+        if len(out) == 0:
             raise RuntimeError(
-                "Profile workload: " f"{exec_key}" " failed. " f"Results: {result}."
+                "Profile workload: " + "" + "failed. " "Results: {}.".format(result)
             )
-
-        out = min(result, key=lambda x: x[1].duration)
-        best_algo = out[0]
-        workspace = out[1].workspace
+        best_algo = out[0][0]
+        workspace = out[0][1].workspace
         ## cache
         cache_record = NormRecordEntry(
             exec_entry=exec_key,
@@ -349,7 +345,7 @@ class group_norm(Operator):
             target=target.name(), op=self._attrs["op"]
         )
         func = registry.get(func_key)
-        return func(self._attrs, workdir)
+        func(self._attrs, workdir)
 
     def _extract_exec_path(self, dynamic_profiling_strategy=DynamicProfileStrategy.MAX):
         """Extract execution key, i.e. input arguments for the profiler.
@@ -406,9 +402,3 @@ class group_norm(Operator):
 
     def _inputs_for_pseudo_code(self):
         return self._attrs["inputs"] + [f"num_groups={self._attrs['num_groups']}"]
-
-    def _get_op_attributes(self):
-        return {
-            "num_groups": self._attrs["num_groups"],
-            "num_channels": self._attrs["num_channels"],
-        }

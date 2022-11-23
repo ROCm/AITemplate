@@ -24,8 +24,9 @@ import bisect
 
 import jinja2
 
-from ...backend_spec import CUDASpec
 from ...common import tensor_accessor_codegen
+
+from .. import cuda_common
 
 from . import reduce_small_axis
 
@@ -61,8 +62,8 @@ using ReductionKernel{{layout}}_{{align}} = ReductionKernel3D<
 FUNC_DECL_TEMPLATE = jinja2.Template(
     """
 void {{func_name}}(
-  void * /*output*/,
-  void * /*input*/,
+  {{elem_output_type}} * /*output*/,
+  {{elem_input_type}} * /*input*/,
   int /*reduction_axis*/,
   int64_t *[] /*output_shape*/,
   const int64_t * /*input_shape*/,
@@ -101,9 +102,7 @@ EXEC_COND_TEMPLATE = jinja2.Template(
 {% for align in alignments %}
 {{indent}}  if (input_shape[reduction_axis] % {{align}} == 0) {
 {{indent}}    reduce_mean_launcher_RowMajor_{{align}}(
-{{indent}}      static_cast<{{elem_output_type}}*>(output),
-{{indent}}      static_cast<{{elem_input_type}}*>(input),
-{{indent}}      b, m, n, batch_stride_input, batch_stride_output, stream);
+{{indent}}      output, input, b, m, n, batch_stride_input, batch_stride_output, stream);
 {{indent}}    return;
 {{indent}}  }
 {% endfor %}
@@ -124,9 +123,7 @@ EXEC_COND_TEMPLATE = jinja2.Template(
 {{indent}}    throw std::runtime_error("unreachable: invalid rank");
 {{indent}}  }
 {{indent}}  reduce_mean_launcher_ColumnMajor_1(
-{{indent}}    static_cast<{{elem_output_type}}*>(output),
-{{indent}}    static_cast<{{elem_input_type}}*>(input),
-{{indent}}    b, m, n, batch_stride_input, batch_stride_output, stream);
+{{indent}}    output, input, b, m, n, batch_stride_input, batch_stride_output, stream);
 {{indent}}  return;
 {{indent}}}
 #else
@@ -509,10 +506,9 @@ struct ReductionKernel3D {
 {{reduce_kernel_instance}}
 
 {% for align in alignments %}
-template<typename ElementOutput, typename ElementInput>
 void reduce_mean_launcher_RowMajor_{{align}}(
-  ElementOutput *output,
-  ElementInput *input,
+  {{elem_output_type}} *output,
+  {{elem_input_type}} *input,
   int64_t batch_count,
   int64_t rows,
   int64_t columns,
@@ -562,10 +558,9 @@ void reduce_mean_launcher_RowMajor_{{align}}(
 }
 {% endfor %}
 
-template<typename ElementOutput, typename ElementInput>
 void reduce_mean_launcher_ColumnMajor_1(
-  ElementOutput *output,
-  ElementInput *input,
+  {{elem_output_type}} *output,
+  {{elem_input_type}} *input,
   int64_t batch_count,
   int64_t rows,
   int64_t columns,
@@ -678,8 +673,8 @@ static void normalize_input_shape(
 }
 
 void {{func_name}}(
-  void *output,
-  void *input,
+  {{elem_output_type}} *output,
+  {{elem_input_type}} *input,
   int reduction_axis,
   int64_t *output_shape[],
   const int64_t *orig_input_shape,
@@ -788,7 +783,13 @@ def gen_function_decl(func_attrs) -> str:
     str
         returns the rendered function declaration with appropriate replacements
     """
-    return FUNC_DECL_TEMPLATE.render(func_name=func_attrs["name"])
+    x = func_attrs["inputs"][0]
+    y = func_attrs["outputs"][0]
+    return FUNC_DECL_TEMPLATE.render(
+        func_name=func_attrs["name"],
+        elem_input_type=cuda_common.dtype_to_cutlass_type(x._attrs["dtype"]),
+        elem_output_type=cuda_common.dtype_to_cutlass_type(y._attrs["dtype"]),
+    )
 
 
 def gen_function(
@@ -824,9 +825,8 @@ def gen_function(
     """
     x = func_attrs["inputs"][0]
     y = func_attrs["outputs"][0]
-    backend_spec = CUDASpec()
-    input_type = backend_spec.dtype_to_lib_type(x._attrs["dtype"])
-    output_type = backend_spec.dtype_to_lib_type(y._attrs["dtype"])
+    input_type = cuda_common.dtype_to_cutlass_type(x._attrs["dtype"])
+    output_type = cuda_common.dtype_to_cutlass_type(y._attrs["dtype"])
     if accumulation_type is None:
         # follow pytorch's semantics
         acc_type = output_type
@@ -920,9 +920,6 @@ def gen_function(
     exec_paths = EXEC_COND_TEMPLATE.render(
         indent="  ",
         func_name=func_attrs["name"],
-        elem_output_type=output_type,
-        elem_input_type=input_type,
-        elem_compute_type=acc_type,
         alignments=alignments,
         special_exec_cond=special_exec_path,
     )
@@ -943,11 +940,15 @@ def gen_function(
         alignments=alignments,
         prologue_code=prologue_code,
         epilogue_scalar_code=epilogue_scalar_code,
+        elem_input_type=input_type,
+        elem_output_type=output_type,
         special_kernel=special_kernel,
     )
 
     return SRC_TEMPLATE.render(
         func_name=func_attrs["name"],
+        elem_input_type=input_type,
+        elem_output_type=output_type,
         kernel_source=kernel_src,
         exec_paths=exec_paths,
         output_accessor=output_accessors[0],

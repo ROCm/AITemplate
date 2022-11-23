@@ -48,6 +48,7 @@ EXEC_COND_TEMPLATE = jinja2.Template(
 
 class layernorm(Operator):
     """Standalone layernorm op.
+
     Applies Layer Normalization over a mini-batch of inputs as described in the
     paper Layer Normalization. The mean and standard-deviation are calculated
     over the last D dimensions, where D is the dimension of normalized_shape.
@@ -163,6 +164,7 @@ class layernorm(Operator):
         self._sanity_check(x, gamma, beta)
         self._set_depth()
         output_shape = self._infer_shapes(x)
+        self._extract_exec_path()
         output = Tensor(output_shape, src_ops={self})
         self._attrs["outputs"] = [output]
         self._attrs["output_accessors"] = [TensorAccessor(output)]
@@ -215,7 +217,7 @@ class layernorm(Operator):
                 key_strs.append(f"{name} >= {values[0]} && {name} <= {values[-1]}")
             else:
                 raise RuntimeError(
-                    "Softmax input has empty dim values: {}".format(values)
+                    "Layernorm input has empty dim values: {}".format(values)
                 )
         return " && ".join(key_strs)
 
@@ -228,9 +230,10 @@ class layernorm(Operator):
             A dynamic profiling strategy. By default MAX is used, i.e. to profile
             a dynamic range, an upper bound will be used.
         """
-        assert (
-            len(self._attrs["normalized_shape"]) == 1
-        ), "For profiling, normalized_shape must be 1D"
+        if self._attrs["has_profiler"]:
+            assert (
+                len(self._attrs["normalized_shape"]) == 1
+            ), "For profiling, normalized_shape must be 1D"
 
         m_max = 1
         m_min = 1
@@ -328,14 +331,13 @@ class layernorm(Operator):
         runner.join()
         result = runner.pull()
 
-        if len(result) == 0:
+        out = sorted(result, key=lambda x: x[1])
+        if len(out) == 0:
             raise RuntimeError(
-                "Profile workload: " f"{exec_key}" " failed. " f"Results: {result}."
+                "Profile workload: " + "" + "failed. " "Results: {}.".format(result)
             )
-
-        out = min(result, key=lambda x: x[1].duration)
-        best_algo = out[0]
-        workspace = out[1].workspace
+        best_algo = out[0][0]
+        workspace = out[0][1].workspace
         ## cache
         cache_record = NormRecordEntry(
             exec_entry=exec_key,
@@ -403,16 +405,6 @@ class layernorm(Operator):
         workdir: str = None,
         dynamic_profiling_strategy=DynamicProfileStrategy.HINTS,
     ) -> None:
-        """Generator profiler. The profiler files are standalone executable for profiling.
-
-        Parameters
-        ----------
-        workdir : str, optional
-            Base dir to keep profiling source codes, by default "./"
-        dynamic_profiling_strategy: DynamicProfileStrategy, optional
-            A dynamic profiling strategy, used to filter generated profiles at compile time.
-            See also: :func:`~aitemplate.compiler.transform.profile.profile`
-        """
         target = Target.current()
         # init candidate ops
         func_key = "{target}.{op}.config".format(
@@ -424,7 +416,4 @@ class layernorm(Operator):
             target=target.name(), op=self._attrs["op"]
         )
         func = registry.get(func_key)
-        return func(self._attrs, workdir)
-
-    def _get_op_attributes(self):
-        return {"normalized_shape": self._attrs["default_normalized_shape"]}
+        func(self._attrs, workdir)

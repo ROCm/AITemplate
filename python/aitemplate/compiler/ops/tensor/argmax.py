@@ -121,7 +121,7 @@ class argmax(Operator):
             target=target.name(), op=self._attrs["op"]
         )
         func = registry.get(func_key)
-        return func(self._attrs, workdir)
+        func(self._attrs, workdir)
 
     def _gen_exec_key(self, shape: List[int]):
         """rending the shape info"""
@@ -164,13 +164,12 @@ class argmax(Operator):
         runner.join()
         result = runner.pull()
 
-        if len(result) == 0:
+        out = sorted(result, key=lambda x: x[1])
+        if len(out) == 0:
             raise RuntimeError(
-                "Profile workload: " f"{exec_key}" " failed. " f"Results: {result}."
+                "Profile workload: " + "" + "failed. " "Results: {}.".format(result)
             )
-
-        out = min(result, key=lambda x: x[1].duration)
-        workspace = out[1].workspace
+        workspace = out[0][1].workspace
         return workspace
 
     def profile(
@@ -180,6 +179,7 @@ class argmax(Operator):
         dynamic_profiling_strategy=None,
     ):
         """Get the Argmax Op workspace
+
         Parameters
         ----------
         workdir : str, optional

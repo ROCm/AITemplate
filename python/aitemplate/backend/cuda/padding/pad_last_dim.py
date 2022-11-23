@@ -18,15 +18,14 @@ Codegen functions for pad_last_dim.
 import jinja2
 
 from ... import registry
-from ...backend_spec import CUDASpec
 
 # pylint: disable=C0301,W0613,W0612
 
 FUNC_DECL_TEMPLATE = jinja2.Template(
     """
 void {{func_name}}(
-  void*,
-  void*,
+  cutlass::half_t*,
+  cutlass::half_t*,
   {%for i in range(ndim)%}
   int64_t*,
   {% endfor %}
@@ -59,9 +58,9 @@ FUNC_CALL_TEMPLATE = jinja2.Template(
 
 EXEC_TEMPLATE = jinja2.Template(
     """
-{{indent}}padding4d_launcher<{{elem_input_type}}, {{elem_input_type2}}>(
-{{indent}}    static_cast<{{elem_input_type}}*>(in_ptr),
-{{indent}}    static_cast<{{elem_input_type}}*>(out_ptr),
+{{indent}}padding4d_launcher(
+{{indent}}    in_ptr,
+{{indent}}    out_ptr,
 {%for i in range(4 - ndim)%}
 1,
 {% endfor %}
@@ -141,24 +140,23 @@ __global__ void padding4d_kernel(const T* input,
 }
 
 
-template <typename ElemT, typename ElemT2>
-void padding4d_launcher(ElemT* in_ptr,
-                        ElemT* out_ptr,
+
+void padding4d_launcher(cutlass::half_t* in_ptr,
+                        cutlass::half_t* out_ptr,
                         const int32_t x_dim0,
                         const int32_t x_dim1,
                         const int32_t x_dim2,
                         const int32_t x_dim3,
                         const int32_t out_dim,
                         cudaStream_t stream) {
-  static_assert(sizeof(ElemT2) % sizeof(ElemT) == 0);
   const int block_size = 256;
   if ((out_dim % 2) == 0 && (x_dim3 % 2) == 0) {
     int32_t total_elements = x_dim0 * x_dim1 * x_dim2 * x_dim3 / 2;
     dim3 grid((total_elements + 255) /  block_size);
     dim3 block(block_size);
-    const ElemT2 zero  = {0.0f, 0.0f};
-    padding4d_kernel<ElemT2><<<grid, block, 0, stream>>>(
-        reinterpret_cast<const ElemT2*>(in_ptr), reinterpret_cast<ElemT2*>(out_ptr),
+    const __half2 zero  = {0.0f, 0.0f};
+    padding4d_kernel<__half2><<<grid, block, 0, stream>>>(
+        (const __half2*)in_ptr, (__half2*)out_ptr,
         x_dim0, x_dim1, x_dim2, x_dim3 / 2,
         out_dim / 2,
         zero
@@ -167,9 +165,9 @@ void padding4d_launcher(ElemT* in_ptr,
     int32_t total_elements = x_dim0 * x_dim1 * x_dim2 * x_dim3;
     dim3 grid((total_elements + 255) /  block_size);
     dim3 block(block_size);
-    const ElemT zero = static_cast<ElemT>(0.f);
-    padding4d_kernel<ElemT><<<grid, block, 0, stream>>>(
-        in_ptr, out_ptr,
+    const __half zero = static_cast<__half>(0.f);
+    padding4d_kernel<__half><<<grid, block, 0, stream>>>(
+        (const __half*)in_ptr, (__half*)out_ptr,
         x_dim0, x_dim1, x_dim2, x_dim3,
         out_dim,
         zero
@@ -180,8 +178,8 @@ void padding4d_launcher(ElemT* in_ptr,
 } // namespace
 
 void {{function_name}} (
-    void* in_ptr,
-    void* out_ptr,
+    cutlass::half_t* in_ptr,
+    cutlass::half_t* out_ptr,
     {%for i in range(ndim)%}
     int64_t* x_dim{{i}},
     {% endfor %}
@@ -220,15 +218,6 @@ def gen_function(func_attrs, template_path, shape_eval_template, shape_save_temp
         [description]
     """
     func_name = func_attrs["name"]
-    backend_spec = CUDASpec()
-    elem_input_type = backend_spec.dtype_to_backend_type(
-        func_attrs["inputs"][0]._attrs["dtype"]
-    )
-    elem_input_type2 = None
-    if elem_input_type == "half":
-        elem_input_type2 = "half2"
-    else:
-        raise NotImplementedError(f"unsupported {elem_input_type=}")
     ndim = func_attrs["ndim"]
     xshape = ["*x_dim%d" % i for i in range(ndim)]
     shape_eval_func = shape_eval_template.render(
@@ -239,15 +228,9 @@ def gen_function(func_attrs, template_path, shape_eval_template, shape_save_temp
         indent="  ", shape=yshape, last_dim="*y_dim%d" % (ndim - 1)
     )
     shape_func = shape_eval_func + shape_save_func
-    exec_paths = EXEC_TEMPLATE.render(
-        elem_input_type=elem_input_type,
-        elem_input_type2=elem_input_type2,
-        ndim=func_attrs["ndim"],
-        indent="  ",
-    )
+    exec_paths = EXEC_TEMPLATE.render(ndim=func_attrs["ndim"], indent="  ")
     return SRC_TEMPLATE.render(
         function_name=func_name,
-        elem_input_type=elem_input_type,
         shape_function=shape_func,
         exec_paths=exec_paths,
         ndim=func_attrs["ndim"],

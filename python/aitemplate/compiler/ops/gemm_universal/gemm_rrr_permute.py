@@ -45,6 +45,7 @@ class gemm_rrr_permute(gemm_rrr):
         self._set_depth()
         self._sanity_check(a, b)
         output_shape = self._infer_shapes(a, b)
+        self._extract_epilogue_alignment(output_shape)
 
         output = Tensor(output_shape, src_ops={self})
         self._attrs["outputs"] = [output]
@@ -54,15 +55,8 @@ class gemm_rrr_permute(gemm_rrr):
             m, n = output_shape
             t1, t2, t3 = self._attrs["shape"]
             output_shape = [t2, m.value() // t1, t3, t1, n.value() // t2 // t3]
-            self._extract_epilogue_alignment(output_shape)
             return reshape()(output, output_shape)
         else:
             raise NotImplementedError(
                 "{} is not implemented!".format(self._attrs["layout"])
             )
-
-    def _get_op_attributes(self):
-        return {
-            "layout": self._attrs["layout"].split("_")[-1],
-            "shape": self._attrs["shape"],
-        }

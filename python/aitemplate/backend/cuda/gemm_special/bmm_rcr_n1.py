@@ -43,9 +43,9 @@ from ..gemm_universal import common
 FUNC_DECL_TEMPLATE = jinja2.Template(
     """
 void {{func_name}}(
-  void*,
-  void*,
-  void*,
+  {{elem_input_type}}*,
+  {{elem_input_type}}*,
+  {{elem_input_type}}*,
   {% for i in range(3) %}
   int64_t*,
   {% endfor %}
@@ -92,9 +92,9 @@ FUNC_CALL_TEMPLATE = jinja2.Template(
 EXEC_TEMPLATE = jinja2.Template(
     """
 {{indent}}bmm_rcr_n1_launcher<{{elem_input_type}}, {{read_vec_type}}, {{K}}>(
-{{indent}}    ({{elem_input_type}}*)a_ptr,
-{{indent}}    ({{elem_input_type}}*)b_ptr,
-{{indent}}    ({{elem_input_type}}*)c_ptr,
+{{indent}}    a_ptr,
+{{indent}}    b_ptr,
+{{indent}}    c_ptr,
 {{indent}}    B,
 {{indent}}    M,
 {{indent}}    alpha,
@@ -447,9 +447,9 @@ void bmm_rcr_n1_launcher(ElemT* a_ptr,
 } // namespace
 
 void {{function_name}} (
-    void* a_ptr,
-    void* b_ptr,
-    void* c_ptr,
+    {{elem_input_type}}* a_ptr,
+    {{elem_input_type}}* b_ptr,
+    {{elem_input_type}}* c_ptr,
     {% for i in range(3) %}
     int64_t *a_dim{{loop.index0}},
     {% endfor %}
@@ -496,10 +496,8 @@ def gen_function(func_attrs, exec_cond_template, dim_info_dict):
     bk = _get_original_dim_val(func_attrs, 1, 2)
     assert ak == bk, f"ak is not equal to bk. ak: {ak}, bk: {bk}"
 
+    elem_input_type = "cutlass::half_t"
     backend_spec = CUDASpec()
-    elem_input_type = backend_spec.dtype_to_backend_type(
-        func_attrs["inputs"][0]._attrs["dtype"]
-    )
     vec_lens = list(zip(*backend_spec.read_num_elements_to_backend_type))[0][:-1]
     alignment = tensor_accessor_codegen.find_max_alignment(
         ak, func_attrs["input_accessors"]
@@ -562,17 +560,8 @@ def gen_function(func_attrs, exec_cond_template, dim_info_dict):
 @registry.reg("cuda.bmm_rcr_n1.func_decl")
 def gen_function_decl(func_attrs):
     func_name = func_attrs["name"]
-    backend_spec = CUDASpec()
-    elem_input_type = backend_spec.dtype_to_lib_type(
-        func_attrs["inputs"][0]._attrs["dtype"]
-    )
-    elem_output_type = backend_spec.dtype_to_lib_type(
-        func_attrs["outputs"][0]._attrs["dtype"]
-    )
     return FUNC_DECL_TEMPLATE.render(
-        func_name=func_name,
-        elem_input_type=elem_input_type,
-        elem_output_type=elem_output_type,
+        func_name=func_name, elem_input_type="cutlass::half_t"
     )
 
 

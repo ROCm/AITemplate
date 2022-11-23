@@ -329,7 +329,7 @@ class conv2d(Operator):
             target=target.name(), op=self._attrs["op"]
         )
         func = registry.get(func_key)
-        return func(self._attrs, workdir, self.shape_eval_template)
+        func(self._attrs, workdir, self.shape_eval_template)
 
     def _gen_profile_cmd(self, profiler_prefix, cfg, x_shape):
         exe_path = os.path.join(profiler_prefix, cfg)
@@ -411,13 +411,14 @@ class conv2d(Operator):
 
         runner.join()
         result = runner.pull()
-        if len(result) == 0:
+
+        out = sorted(result, key=lambda x: x[1])
+        if len(out) == 0:
             raise RuntimeError(
-                "Profile workload: " f"{exec_key}" " failed. " f"Results: {result}."
+                "Profile workload: " + "" + "failed. " "Results: {}.".format(result)
             )
-        out = min(result, key=lambda x: x[1].duration)
-        best_algo = out[0]
-        workspace = out[1].workspace
+        best_algo = out[0][0]
+        workspace = out[0][1].workspace
         ## cache
         cache_record = ConvRecordEntry(
             exec_entry=exec_key,
@@ -454,10 +455,6 @@ class conv2d(Operator):
         if devices is None:
             devices = [0]
         self._profile_static(workdir, devices)
-
-        target = backend.target.Target.current()
-        if target.use_dummy_profiling_results():
-            return
 
         has_dynamic = False
         for input_tensor in self._attrs["inputs"]:

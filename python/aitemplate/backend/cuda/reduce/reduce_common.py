@@ -18,17 +18,17 @@ CUDA reduce common functions
 import jinja2
 
 from ....compiler.base import IntImm, IntVar
-from ...backend_spec import CUDASpec
+from .. import cuda_common
 
 FUNC_DECL_TEMPLATE = jinja2.Template(
     """
 void {{func_name}}(
-  void*          /*dst_ptr*/,
-  void*          /*src_ptr*/,
-  int            /*reduction_axis*/,
-  const int64_t* /*shape*/,
-  const int      /*rank*/,
-  uint8_t*       /*workspace*/,
+  {{elem_output_type}}* /*dst_ptr*/,
+  {{elem_input_type}}*  /*src_ptr*/,
+  int                   /*reduction_axis*/,
+  const int64_t*        /*shape*/,
+  const int             /*rank*/,
+  uint8_t*              /*workspace*/,
   cudaStream_t
 );
 """
@@ -38,14 +38,8 @@ void {{func_name}}(
 EXEC_COND_TEMPLATE = jinja2.Template(
     """
 {{indent}}if (shape[rank - 1] % {{vector_length}} == 0) {
-{{indent}}  {{func_name}}_launcher<{{elem_output_type}}, {{elem_input_type}}, {{vector_length}}>(
-{{indent}}      static_cast<{{elem_output_type}}*>(dst_ptr),
-{{indent}}      static_cast<{{elem_input_type}}*>(src_ptr),
-{{indent}}      reduction_axis,
-{{indent}}      shape,
-{{indent}}      rank,
-{{indent}}      workspace,
-{{indent}}      stream);
+{{indent}}  {{func_name}}_launcher<{{vector_length}}>(
+{{indent}}      dst_ptr, src_ptr, reduction_axis, shape, rank, workspace, stream);
 {{indent}}  return;
 }
 """
@@ -73,10 +67,10 @@ SRC_TEMPLATE = jinja2.Template(
     }                                                                                 \\
   }
 
-template <typename ElemOutputType, typename ElemInputType, int VectorLength = 1>
+template <int VectorLength = 1>
 void {{func_name}}_launcher(
-    ElemOutputType *dst_ptr,
-    ElemInputType *src_ptr,
+    {{elem_output_type}} *dst_ptr,
+    {{elem_input_type}} *src_ptr,
     int reduction_axis,
     const int64_t *shape,
     const int rank,
@@ -85,17 +79,15 @@ void {{func_name}}_launcher(
   // Instead of making our own 4D tensor definition,
   // we simply use TensoeNHWC as a 4D tensor
   using Layout = cutlass::layout::TensorNHWC;
-  // Match pytorch's behavior where the accumuation type is the same
-  // as the output type
-  using ElementCompute = ElemOutputType;
+  using ElementCompute = {{elem_compute_type}};
   using ReductionOp = {{reduction_op}}<ElementCompute>;
   constexpr int NUM_DIMS = 4;
   assert(rank <= NUM_DIMS);
   assert(reduction_axis < rank);
   assert(rank > 0);
   using TensorReduction = cutlass::reduction::device::TensorReduction<
-    ElemOutputType,
-    ElemInputType,
+    {{elem_output_type}},
+    {{elem_input_type}},
     Layout,
     ReductionOp,
     VectorLength,
@@ -142,8 +134,8 @@ void {{func_name}}_launcher(
 }
 #undef CUTLASS_CHECK_REDUCE
 void {{func_name}}(
-    void *dst_ptr,
-    void *src_ptr,
+    {{elem_output_type}} *dst_ptr,
+    {{elem_input_type}}  *src_ptr,
     int reduction_axis,
     const int64_t *shape,
     const int rank,
@@ -173,7 +165,7 @@ FUNC_CALL_TEMPLATE = jinja2.Template(
   {{indent}}    {{reduction_axis}},
   {{indent}}    shape,
   {{indent}}    {{rank}},
-  {{indent}}    global_workspace_,
+  {{indent}}    global_workspace,
   {{indent}}    stream
   {{indent}});
 {{indent}}}
@@ -182,38 +174,39 @@ FUNC_CALL_TEMPLATE = jinja2.Template(
 
 
 def gen_function_decl(func_attrs):
+    x = func_attrs["inputs"][0]
+    y = func_attrs["outputs"][0]
     return FUNC_DECL_TEMPLATE.render(
         func_name=func_attrs["name"],
+        elem_input_type=cuda_common.dtype_to_cutlass_type(x._attrs["dtype"]),
+        elem_output_type=cuda_common.dtype_to_cutlass_type(y._attrs["dtype"]),
     )
 
 
 def gen_function(func_attrs, reduction_op):
-    backend_spec = CUDASpec()
-    elem_input_type = backend_spec.dtype_to_lib_type(
-        func_attrs["inputs"][0]._attrs["dtype"]
-    )
-    elem_output_type = backend_spec.dtype_to_lib_type(
-        func_attrs["outputs"][0]._attrs["dtype"]
-    )
-
     vector_lens_config = [32, 16, 8, 4, 1]
     exec_paths = ""
     for vlen in vector_lens_config:
         exec_program = EXEC_COND_TEMPLATE.render(
-            func_name=func_attrs["name"],
-            elem_input_type=elem_input_type,
-            elem_output_type=elem_output_type,
-            vector_length=vlen,
-            indent="  ",
+            func_name=func_attrs["name"], vector_length=vlen, indent="  "
         )
         exec_paths += exec_program
 
+    x = func_attrs["inputs"][0]
+    y = func_attrs["outputs"][0]
+    input_type = cuda_common.dtype_to_cutlass_type(x._attrs["dtype"])
+    output_type = cuda_common.dtype_to_cutlass_type(y._attrs["dtype"])
     if func_attrs.get("workspace", 0) > 0:
         workspace_ptr = "workspace"
     else:
         workspace_ptr = "nullptr"
     return SRC_TEMPLATE.render(
         func_name=func_attrs["name"],
+        elem_input_type=input_type,
+        elem_output_type=output_type,
+        # Match pytorch's behavior where the accumuation type is the same
+        # as the output type
+        elem_compute_type=output_type,
         reduction_op=reduction_op,
         exec_paths=exec_paths,
         workspace_ptr=workspace_ptr,

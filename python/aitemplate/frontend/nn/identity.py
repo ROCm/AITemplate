@@ -21,8 +21,6 @@ from .module import Module
 
 
 class Identity(Module):
-    """The identify of the input."""
-
     def __init__(
         self,
         dtype="float16",

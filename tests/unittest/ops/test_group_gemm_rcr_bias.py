@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 @unittest.skipIf(detect_target().name() == "rocm", "Not supported by ROCM.")
-class GroupGEMMRcrBiasTestCase(unittest.TestCase):
+class GEMMTestCase(unittest.TestCase):
     def test_rcr(self):
         M = 256
         K1 = 128

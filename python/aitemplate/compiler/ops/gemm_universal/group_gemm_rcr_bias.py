@@ -20,8 +20,6 @@ from typing import List
 
 import jinja2
 
-from aitemplate.compiler.stable_set import StableSet
-
 from ...base import ExecItem, Tensor
 from ...tensor_accessor import TensorAccessor
 from .gemm_rcr_bias import gemm_rcr_bias
@@ -48,6 +46,7 @@ class group_gemm_rcr_bias(group_gemm_rcr):
 
     .. highlight:: python
     .. code-block:: python
+
         # group 1
         A1 = torch.randn(M1, K1).cuda().half()
         B1 = torch.randn(N1, K1).cuda().half()
@@ -123,7 +122,7 @@ class group_gemm_rcr_bias(group_gemm_rcr):
         for a, b, bias in operand_groups:
             op = gemm_rcr_bias()
             c = op(a, b, bias)
-            c._attrs["src_ops"] = StableSet([self])
+            c._attrs["src_ops"] = [self]
             a._attrs["dst_ops"].remove(op)
             b._attrs["dst_ops"].remove(op)
             bias._attrs["dst_ops"].remove(op)

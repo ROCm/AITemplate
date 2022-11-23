@@ -202,6 +202,7 @@ class softmax(Operator):
         self._attrs["dim"] = dim
         self._set_depth()
         output_shape = self._infer_shapes(x)
+        self._extract_exec_path()
         output = Tensor(output_shape, src_ops={self})
         self._attrs["outputs"] = [output]
         return output
@@ -270,14 +271,13 @@ class softmax(Operator):
         runner.join()
         result = runner.pull()
 
-        if len(result) == 0:
+        out = sorted(result, key=lambda x: x[1])
+        if len(out) == 0:
             raise RuntimeError(
-                "Profile workload: " f"{exec_key}" " failed. " f"Results: {result}."
+                "Profile workload: " + "" + "failed. " "Results: {}.".format(result)
             )
-
-        out = min(result, key=lambda x: x[1].duration)
-        best_algo = out[0]
-        workspace = out[1].workspace
+        best_algo = out[0][0]
+        workspace = out[0][1].workspace
         ## cache
         cache_record = NormRecordEntry(
             exec_entry=exec_key,
@@ -345,16 +345,6 @@ class softmax(Operator):
         workdir: str = None,
         dynamic_profiling_strategy=DynamicProfileStrategy.HINTS,
     ) -> None:
-        """Generator profiler. The profiler files are standalone executable for profiling.
-
-        Parameters
-        ----------
-        workdir : str, optional
-            Base dir to keep profiling source codes, by default "./"
-        dynamic_profiling_strategy: DynamicProfileStrategy, optional
-            A dynamic profiling strategy, used to filter generated profiles at compile time.
-            See also: :func:`~aitemplate.compiler.transform.profile.profile`
-        """
         target = Target.current()
         # init candidate ops
         func_key = "{target}.{op}.config".format(
@@ -366,16 +356,9 @@ class softmax(Operator):
             target=target.name(), op=self._attrs["op"]
         )
         func = registry.get(func_key)
-        return func(self._attrs, workdir)
+        func(self._attrs, workdir)
 
     def gen_function(self) -> str:
-        """Generate function body.
-
-        Returns
-        -------
-        str
-            The rendered template of generated function body.
-        """
         target = backend.target.Target.current()
         func_key = "{target}.{op}.gen_function".format(
             target=target.name(), op=self._attrs["op"]

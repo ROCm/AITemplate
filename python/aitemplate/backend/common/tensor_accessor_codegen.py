@@ -22,7 +22,6 @@ from typing import List
 import jinja2
 
 from ...compiler.tensor_accessor import TensorAccessor
-from ...utils import alignment
 from ..target import Target
 
 # Template used to transform a Python TensorAccessor object
@@ -72,6 +71,27 @@ def get_libs() -> str:
     )
 
 
+# Currently read4, add2 is best for both backend, so two backend seems identical.
+# They may diverge when we got deeper understanding / further optimization.
+ALIGNMENTS = [
+    8,
+    4,
+    2,
+    1,
+]
+
+
+def _find_max_alignment(number: int) -> int:
+    """
+    Return the first alignment value that meets the alignment requirement
+    for accessing the `number` of elements.
+    """
+    for alignment in ALIGNMENTS:
+        if number % alignment == 0:
+            return alignment
+    return 1
+
+
 def find_max_alignment_for_accessor(accessor: TensorAccessor) -> int:
     """the max alignment value that meets the requirement specified by
        the accessor
@@ -85,21 +105,17 @@ def find_max_alignment_for_accessor(accessor: TensorAccessor) -> int:
     int
         the max alignment value
     """
-    align = alignment.find_max_alignment(accessor.offset)
+    alignment = _find_max_alignment(accessor.offset)
     if not accessor.is_contiguous:
-        align = min(
-            align,
-            alignment.find_max_alignment(
-                accessor.original_total_elements_from_stride_dim
-            ),
+        alignment = min(
+            alignment,
+            _find_max_alignment(accessor.original_total_elements_from_stride_dim),
         )
-        align = min(
-            align,
-            alignment.find_max_alignment(
-                accessor.actual_total_elements_from_stride_dim
-            ),
+        alignment = min(
+            alignment,
+            _find_max_alignment(accessor.actual_total_elements_from_stride_dim),
         )
-    return align
+    return alignment
 
 
 def find_max_alignment_for_accessors(accessors: List[TensorAccessor]) -> int:
@@ -116,11 +132,11 @@ def find_max_alignment_for_accessors(accessors: List[TensorAccessor]) -> int:
     int
         the max alignment value
     """
-    align = max(alignment.ALIGNMENTS)
+    alignment = max(ALIGNMENTS)
     # Handle accessors
     for accessor in accessors:
-        align = min(align, find_max_alignment_for_accessor(accessor))
-    return align
+        alignment = min(alignment, find_max_alignment_for_accessor(accessor))
+    return alignment
 
 
 def find_max_alignment(num_elements: int, accessors: List[TensorAccessor]) -> int:
@@ -142,6 +158,6 @@ def find_max_alignment(num_elements: int, accessors: List[TensorAccessor]) -> in
         the max alignment value
     """
     # get initial alignment based on the number of elements being accessed
-    align = alignment.find_max_alignment(num_elements)
+    alignment = _find_max_alignment(num_elements)
     accessor_alignment = find_max_alignment_for_accessors(accessors)
-    return min(align, accessor_alignment)
+    return min(alignment, accessor_alignment)

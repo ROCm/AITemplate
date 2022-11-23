@@ -17,8 +17,6 @@ Codegen for conv2d.
 """
 import jinja2
 
-from aitemplate.backend.backend_spec import CUDASpec
-
 from ... import registry
 from . import common
 
@@ -37,10 +35,10 @@ EXEC_TEMPLATE = jinja2.Template(
 //  TODO: cast to right dtype
 {{indent}}typename {{instance}}::Arguments arguments{
 {{indent}}    problem_size,
-{{indent}}    {static_cast<{{dtype}}*>(in_ptr), layout_A},
-{{indent}}    {static_cast<{{dtype}}*>(weight_ptr), layout_B},
-{{indent}}    {static_cast<{{dtype}}*>(out_ptr), layout_C},
-{{indent}}    {static_cast<{{dtype}}*>(out_ptr), layout_C},
+{{indent}}    {(cutlass::half_t*)(in_ptr), layout_A},
+{{indent}}    {(cutlass::half_t*)(weight_ptr), layout_B},
+{{indent}}    {(cutlass::half_t*)(out_ptr), layout_C},
+{{indent}}    {(cutlass::half_t*)(out_ptr), layout_C},
 {{indent}}    {ElementComputeEpilogue(1), ElementComputeEpilogue(0)},
 {{indent}}};
 {{indent}}{{instance}} implicit_gemm_op;
@@ -89,9 +87,9 @@ SRC_TEMPLATE = jinja2.Template(
 {{instances_def}}
 
 void {{function_name}} (
-    void* in_ptr,
-    void* weight_ptr,
-    void* out_ptr,
+    cutlass::half_t* in_ptr,
+    cutlass::half_t* weight_ptr,
+    cutlass::half_t* out_ptr,
     uint8_t* workspace,
     int64_t* batch,
     int64_t* out_ch,
@@ -177,9 +175,9 @@ int main(int argc, char** argv) {
 
   //
   // warmup
-  conv(x.device_data(),
-       w.device_data(),
-       y.device_data(),
+  conv((cutlass::half_t*) x.device_data(),
+       (cutlass::half_t*) w.device_data(),
+       (cutlass::half_t*) y.device_data(),
        global_workspace,
        &NI,
        &CO,
@@ -199,11 +197,11 @@ int main(int argc, char** argv) {
   for (auto & event : events) {
     cudaEventCreate(&event);
   }
-  cudaEventRecord(events[0], stream);
+  cudaEventRecord(events[0]);
   for (int i = 0; i < 5; ++i) {
-      conv(x.device_data(),
-       w.device_data(),
-       y.device_data(),
+      conv((cutlass::half_t*) x.device_data(),
+       (cutlass::half_t*) w.device_data(),
+       (cutlass::half_t*) y.device_data(),
        global_workspace,
        &NI,
        &CO,
@@ -220,7 +218,7 @@ int main(int argc, char** argv) {
        pad,
        stream);
   }
-  cudaEventRecord(events[1], stream);
+  cudaEventRecord(events[1]);
   cudaEventSynchronize(events[1]);
   float runtime_ms = 0;
   cudaEventElapsedTime(&runtime_ms, events[0], events[1]);
@@ -243,9 +241,9 @@ int main(int argc, char** argv) {
 FUNC_DECL_TEMPLATE = jinja2.Template(
     """
 void {{func_name}}(
-  void*,
-  void*,
-  void*,
+  cutlass::half_t*,
+  cutlass::half_t*,
+  cutlass::half_t*,
   uint8_t*,
   int64_t*,
   int64_t*,
@@ -271,7 +269,7 @@ FUNC_CALL_TEMPLATE = jinja2.Template(
 {{indent}}    {{in_ptr}},
 {{indent}}    {{weight_ptr}},
 {{indent}}    {{out_ptr}},
-{{indent}}    global_workspace_,
+{{indent}}    global_workspace,
 {{indent}}    {{p_batch}},
 {{indent}}    {{p_out_ch}},
 {{indent}}    {{p_in_ch}},
@@ -319,8 +317,6 @@ def gen_profiler(func_attrs, workdir, shape_template):
         pad="pad",
     )
     file_pairs = []
-    backend_spec = CUDASpec()
-    dtype = backend_spec.dtype_to_lib_type(func_attrs["inputs"][0]._attrs["dtype"])
     for op_name, op in op_instance.items():
         config = common.emit_instance(op)
         config_name = common.extract_config_name(config)
@@ -329,11 +325,12 @@ def gen_profiler(func_attrs, workdir, shape_template):
             config_name=config_name, name=name, config=config
         )
         exec_program = EXEC_TEMPLATE.render(
-            indent="  ", is_profiler=True, instance=name, dtype=dtype
+            indent="  ", is_profiler=True, instance=name
         )
         op_func = SRC_TEMPLATE.render(
             instances=instance,
             function_name="conv",
+            dtype="cutlass::half_t",
             shape_func="",
             exec_paths=exec_program,
         )
@@ -342,7 +339,7 @@ def gen_profiler(func_attrs, workdir, shape_template):
         )
         common.add_profiler(file_pairs, workdir, op_type, op_name, code)
     # build
-    return common.build_profiler(file_pairs)
+    common.build_profiler(file_pairs)
 
 
 @registry.reg("cuda.conv2d.gen_function")

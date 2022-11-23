@@ -30,7 +30,7 @@ def conv2d_config(func_attrs, dtype="float16"):
 @registry.reg("cuda.conv2d_bias.gen_profiler")
 def gen_profiler(func_attrs, workdir, shape_template):
     """Codegen for conv2d profiler."""
-    return cba.gen_profiler(func_attrs, workdir, shape_template)
+    cba.gen_profiler(func_attrs, workdir, shape_template)
 
 
 @registry.reg("cuda.conv2d_bias.gen_function")

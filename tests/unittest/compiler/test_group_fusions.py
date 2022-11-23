@@ -268,11 +268,6 @@ class GroupOpTestCase(unittest.TestCase):
             fuse_sigmoid_mul=True,
             num_group_ops=2,
         )
-        self._test_group_layernorm_sigmoid_mul_cat_fusion(
-            [[128, 64]] * 50,
-            fuse_sigmoid_mul=True,
-            num_group_ops=2,
-        )
 
         # ctr_mbl_feed overarch cases
         self._test_group_layernorm_sigmoid_mul_cat_fusion(

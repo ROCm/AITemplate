@@ -1143,7 +1143,7 @@ void EfficientNMSInference(
   if (param.scoreBits <= 0 || param.scoreBits > 10) {
     param.scoreBits = -1;
   }
-  EfficientNMSDispatch<{{elem_input_type}}>(
+  EfficientNMSDispatch<__half>(
       param,
       boxesInput,
       scoresInput,

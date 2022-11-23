@@ -27,8 +27,7 @@ import jinja2
 
 from ....compiler.base import IntImm
 
-from ...backend_spec import CUDASpec
-
+from ... import builder
 from ...common import gemm_common, tensor_accessor_codegen
 from ...target import Target
 
@@ -154,19 +153,13 @@ SRC_TEMPLATE = jinja2.Template(
 
 {{instances}}
 
-{% if is_profiler %}
-template <typename GemmInstance>
 void {{function_name}} (
-    GemmInstance& gemm_op,
-{% else %}
-void {{function_name}} (
-{% endif %}
-    void* a_ptr,
-    void* b_ptr,
+    cutlass::half_t* a_ptr,
+    cutlass::half_t* b_ptr,
 {% if has_d %}
-    void* d_ptr,
+    cutlass::half_t* d_ptr,
 {% endif %}
-    void* c_ptr,
+    cutlass::half_t* c_ptr,
     uint8_t* workspace,
 {% if support_split_k %}
     int split_k,
@@ -218,14 +211,13 @@ EXEC_TEMPLATE = jinja2.Template(
 {{problem_args}}
 
 {{indent}}};
+{{indent}}{{instance}} gemm_op;
 {% if is_profiler %}
 {{indent}}// https://www.youtube.com/watch?v=rRwxfYlgG-M
 {{indent}}size_t workspace_size = gemm_op.get_workspace_size(arguments);
 {{indent}}cutlass::device_memory::allocation<uint8_t> local_workspace(workspace_size);
 {{indent}}workspace = local_workspace.get();
 {{indent}}GLOBAL_WORKSPACE_SIZE = workspace_size;
-{% else %}
-{{indent}}{{instance}} gemm_op;
 {% endif %}
 {{indent}}auto status = gemm_op.can_implement(arguments);
 {{indent}}CUTLASS_CHECK(status);
@@ -241,9 +233,9 @@ EXEC_TEMPLATE = jinja2.Template(
 FUNC_DECL_TEMPLATE = jinja2.Template(
     """
 void {{func_name}}(
-  void*,
-  void*,
-  void*,
+  cutlass::half_t*,
+  cutlass::half_t*,
+  cutlass::half_t*,
   uint8_t*,
 {% if support_split_k %}
   int,
@@ -268,16 +260,13 @@ FUNC_CALL_TEMPLATE = jinja2.Template(
 {{indent}}{
 {{indent}}{{local_dim_defs}}
 {{indent}}{{func_name}}(
-{% if is_profiler %}
-{{indent}}    gemm_op,
-{% endif %}
 {{indent}}    {{a_ptr}},
 {{indent}}    {{b_ptr}},
 {% if has_bias %}
 {{indent}}    {{bias_ptr}},
 {% endif %}
 {{indent}}    {{c_ptr}},
-{{indent}}    global_workspace_,
+{{indent}}    global_workspace,
 {{indent}}    {{split_k}},
 {% for dim in adims %}
 {{indent}}    {{dim}},
@@ -290,53 +279,6 @@ FUNC_CALL_TEMPLATE = jinja2.Template(
 {% endfor %}
 {{indent}}    stream
 {{indent}});
-{{indent}}}
-"""
-)
-
-
-BENCHMARK_INSTANCE_TEMPLATE = jinja2.Template(
-    """
-{{indent}}{
-{{indent}}
-{{indent}}{{instance_name}} {{gemm_op}};
-{{indent}}const char *gemm_op_name = "{{gemm_op_name}}";
-{{indent}}int ret = 0;
-{{indent}}try {
-{{indent}}ret = {{func_name}}(
-{{indent}}    {{gemm_op}},
-{{indent}}    gemm_op_name,
-{{indent}}    {{a_ptr}},
-{{indent}}    {{b_ptr}},
-{% if has_bias %}
-{{indent}}    {{bias_ptr}},
-{% endif %}
-{% if has_d %}
-{{indent}}    {{d_ptr}},
-{% endif %}
-{% if has_d1 %}
-{{indent}}    {{d1_ptr}},
-{% endif %}
-{{indent}}    {{c_ptr}},
-{{indent}}    global_workspace_,
-{% if support_split_k %}
-{{indent}}    {{split_k}},
-{% endif %}
-{% for dim in adims %}
-{{indent}}    {{dim}},
-{% endfor %}
-{% for dim in bdims %}
-{{indent}}    {{dim}},
-{% endfor %}
-{% for dim in cdims %}
-{{indent}}    {{dim}},
-{% endfor %}
-{{indent}}    stream
-{{indent}});
-{{indent}}} catch (...) {}
-{{indent}}if (ret != 0)
-{{indent}}  return ret;
-{{indent}}
 {{indent}}}
 """
 )
@@ -354,12 +296,12 @@ TENSOR_DECL_TEMPLATE = jinja2.Template(
   // need to tune it for other devices
   int64_t mem_pool_sz = std::max(2,  std::min(64, int((1 << 25) / ptr_max_sz)));
 
-  memory_pool->AllocateTensor(a_ptr_sz, mem_pool_sz);  // a_ptr: index 0
-  memory_pool->AllocateTensor(b_ptr_sz, mem_pool_sz);  // b_ptr: index 1
-  memory_pool->AllocateTensor(c_ptr_sz, mem_pool_sz);  // c_ptr: index 2
+  memory_pool->AllocateHalfTensor(a_ptr_sz, mem_pool_sz);  // a_ptr: index 0
+  memory_pool->AllocateHalfTensor(b_ptr_sz, mem_pool_sz);  // b_ptr: index 1
+  memory_pool->AllocateHalfTensor(c_ptr_sz, mem_pool_sz);  // c_ptr: index 2
 
 {% if has_bias %}
-  memory_pool->AllocateTensor(c_dim1, mem_pool_sz);  // bias_ptr: index 3
+  memory_pool->AllocateHalfTensor(c_dim1, mem_pool_sz);  // bias_ptr: index 3
 {% endif %}
 
 """
@@ -373,95 +315,6 @@ size_t GLOBAL_WORKSPACE_SIZE = 0;
 
 {{op_func}}
 
-template <typename GemmInstance>
-int benchmark_{{function_name}} (
-{% if is_group_gemm %}
-    GemmInstance &gemm_op,
-    const char *gemm_op_name,
-    int sharedMemPerMultiprocessor,
-    int multiProcessorCount,
-    uint8_t* global_workspace_,
-    int problem_count,
-    cutlass::gemm::GemmCoord* problem_sizes_device,
-    void **ptr_A,
-    void **ptr_B,
-    void **ptr_C,
-{% if has_bias %}
-    void **ptr_bias,
-{% endif %}
-    int64_t* lda,
-    int64_t* ldb,
-    int64_t* ldc,
-{% if has_bias %}
-    int64_t* ldd,
-{% endif %}
-    int occupancy,
-    cudaStream_t stream
-
-{% else %}
-
-    GemmInstance &gemm_op,
-    const char *gemm_op_name,
-    void* a_ptr,
-    void* b_ptr,
-{% if has_bias %}
-    void* bias_ptr,
-{% endif %}
-{% if has_d %}
-    void* d_ptr,
-{% endif %}
-{% if has_d1 %}
-    void* d1_ptr,
-{% endif %}
-    void* c_ptr,
-    uint8_t* global_workspace_,
-{% if support_split_k %}
-    int split_k,
-{% endif %}
-{% for idx in range(input_ndims) %}
-    int64_t* a_dim{{idx}},
-{% endfor %}
-{% for idx in range(weight_ndims) %}
-    int64_t* b_dim{{idx}},
-{% endfor %}
-{% for idx in range(output_ndims) %}
-    int64_t* c_dim{{idx}},
-{% endfor %}
-    cudaStream_t stream
-{% endif %}
-  ) {
-  // warmup
-  for (int i = 0; i < 5; ++i) {
-    {{func_call}}
-  }
-  cudaEvent_t events[2];
-  for (auto & event : events) {
-    cudaEventCreate(&event);
-  }
-  cudaEventRecord(events[0], stream);
-  for (int i = 0; i < 10; ++i) {
-    {{func_call}}
-  }
-  cudaEventRecord(events[1], stream);
-  cudaEventSynchronize(events[1]);
-  float runtime_ms = 0;
-  cudaEventElapsedTime(&runtime_ms, events[0], events[1]);
-  for (auto event : events) {
-    (void)cudaEventDestroy(event);
-  }
-  // TODO: output workspace
-  if (runtime_ms < 0.00001) {
-      throw std::runtime_error(
-      "OOB in cutlass."
-    );
-  }
-  std::cout << "OP:" << gemm_op_name << ",";
-  std::cout << "TIME:" << runtime_ms << ",";
-  std::cout << "WS:" << GLOBAL_WORKSPACE_SIZE << std::endl;
-  return 0;
-}
-
-template <typename DType>
 struct ProfilerMemoryPool {
   ProfilerMemoryPool() {
     std::random_device rd;
@@ -475,6 +328,7 @@ struct ProfilerMemoryPool {
   }
   ~ProfilerMemoryPool() {}
 
+  template <typename DType>
   DType* AllocateGaussianTensor(int64_t size) {
     size_t length = size * sizeof(DType);
     blobs.emplace_back(length);
@@ -491,20 +345,25 @@ struct ProfilerMemoryPool {
   }
 
 
-  int AllocateTensor(int64_t size, int64_t copy) {
+  cutlass::half_t* AllocateHalfGaussianTensor(int64_t size) {
+    return reinterpret_cast<cutlass::half_t*>(
+        AllocateGaussianTensor<__half>(size));
+  }
+
+  int AllocateHalfTensor(int64_t size, int64_t copy) {
     offsets.push_back(0);
     strides.push_back(size);
     copies.push_back(copy);
-    auto ptr = AllocateGaussianTensor(size * copy);
+    auto ptr = AllocateHalfGaussianTensor(size * copy);
     ptrs.push_back(reinterpret_cast<void*>(ptr));
     return ptrs.size() - 1;
   }
 
-  DType* RequestTensorByIdx(int idx) {
+  cutlass::half_t* RequestHalfTensorByIdx(int idx) {
     auto copy = copies.at(idx);
     auto offset = offsets.at(idx);
     auto stride = strides.at(idx);
-    DType* ptr = reinterpret_cast<DType*>(ptrs.at(idx));
+    cutlass::half_t* ptr = reinterpret_cast<cutlass::half_t*>(ptrs.at(idx));
     ptr += offset;
     offset += stride;
     if (offset == copy * stride) {
@@ -528,7 +387,7 @@ int main(int argc, char** argv) {
   int device_idx;
   cudaDeviceProp device_properties;
   cudaError_t result = cudaGetDevice(&device_idx);
-  auto memory_pool = std::make_unique<ProfilerMemoryPool<{{elem_type}}>>();
+  auto memory_pool = std::make_unique<ProfilerMemoryPool>();
   if (result != cudaSuccess) {
     throw std::runtime_error("cudaGetDevice() API call failed.");
   }
@@ -541,12 +400,41 @@ int main(int argc, char** argv) {
 
   {{args_parse}}
 
-  uint8_t* global_workspace_ = nullptr;
+  using ElementOutput = typename {{name}}::ElementC;
+  using ElementInputA = typename {{name}}::ElementA;
+  using ElementInputB = typename {{name}}::ElementB;
+  uint8_t* global_workspace = nullptr;
   cudaStream_t stream = nullptr;
 
   {{tensor_decl}}
 
-  {{benchmark_instances}}
+  // warmup
+  for (int i = 0; i < 5; ++i) {
+    {{func_call}}
+  }
+  cudaEvent_t events[2];
+  for (auto & event : events) {
+    cudaEventCreate(&event);
+  }
+  cudaEventRecord(events[0]);
+  for (int i = 0; i < 10; ++i) {
+    {{func_call}}
+  }
+  cudaEventRecord(events[1]);
+  cudaEventSynchronize(events[1]);
+  float runtime_ms = 0;
+  cudaEventElapsedTime(&runtime_ms, events[0], events[1]);
+  for (auto event : events) {
+    (void)cudaEventDestroy(event);
+  }
+  // TODO: output workspace
+  if (runtime_ms < 0.00001) {
+      throw std::runtime_error(
+      "OOB in cutlass."
+    );
+  }
+  std::cout << "TIME:" << runtime_ms << std::endl;
+  std::cout << "WS:" << GLOBAL_WORKSPACE_SIZE << std::endl;
   return 0;
 }
 """
@@ -624,11 +512,6 @@ def update_alignments_in_gemm_instance(
     epilogue_alignment = tensor_accessor_codegen.find_max_alignment_for_accessor(
         output_accessor
     )
-
-    # if the last dim is dynamic, force align=1
-    if not isinstance(output_accessor.original_shapes[-1], IntImm):
-        epilogue_alignment = 1
-
     gemm_params = get_gemm_instance_template_params(op_def, kernel_config)
     epilogue_align_idx = 11
     a_align_idx = 17
@@ -709,7 +592,7 @@ def emit_instance(
     return op_def
 
 
-def extract_config(f_proc_op, f_kernel_name=kernel_name):
+def extract_config(f_proc_op):
     import cutlass_lib
 
     op_kind = cutlass_lib.library.OperationKind.Gemm
@@ -723,7 +606,7 @@ def extract_config(f_proc_op, f_kernel_name=kernel_name):
             ret = f_proc_op(op)
             if len(ret) > 0:
                 for op_inst in ret:
-                    key = f_kernel_name(op_inst)
+                    key = kernel_name(op_inst)
                     gemm_ops[key] = op_inst
     return gemm_ops
 
@@ -753,13 +636,6 @@ def gen_function(
     output_addr_calculator="",
     extra_code="",
 ):
-    backend_spec = CUDASpec()
-    elem_input_type = backend_spec.dtype_to_lib_type(
-        func_attrs["inputs"][0]._attrs["dtype"]
-    )
-    elem_output_type = backend_spec.dtype_to_lib_type(
-        func_attrs["outputs"][0]._attrs["dtype"]
-    )
     func_name = func_attrs["name"]
     exec_path = func_attrs["exec_path"]
     op_instance = func_attrs["op_instance"]
@@ -821,8 +697,6 @@ def gen_function(
         has_d=has_d(func_attrs),
         has_d1=has_d1(func_attrs),
         extra_code=extra_code,
-        elem_input_type=elem_input_type,
-        elem_output_type=elem_output_type,
     )
 
 
@@ -831,10 +705,11 @@ def build_profiler(file_pairs):
     if target.disable_profiler_codegen():
         file_pairs = []
     elif target.use_dummy_profiling_results():
-        # if it is circle CI only random build 2 profilers
+        # if it is circle CI only random build 2 profiler
         random.shuffle(file_pairs)
         file_pairs = file_pairs[:2]
-    return file_pairs
+    compile_engine = builder.Builder()
+    compile_engine.build_objs(file_pairs, target.compile_cmd(executable=True))
 
 
 def add_profiler(file_pairs, workdir, op_type, output_name, code):
@@ -853,7 +728,6 @@ def add_profiler(file_pairs, workdir, op_type, output_name, code):
 def gen_profiler(
     func_attrs,
     workdir,
-    profiler_filename,
     dim_info_dict,
     src_template,
     problem_args_template,
@@ -865,16 +739,6 @@ def gen_profiler(
 ):
     op_type = func_attrs["op"]
     op_instance = func_attrs["op_instance"]
-    backend_spec = CUDASpec()
-    elem_input_type = backend_spec.dtype_to_lib_type(
-        func_attrs["inputs"][0]._attrs["dtype"]
-    )
-    elem_output_type = backend_spec.dtype_to_lib_type(
-        func_attrs["outputs"][0]._attrs["dtype"]
-    )
-    elem_type = backend_spec.dtype_to_backend_type(
-        func_attrs["inputs"][0]._attrs["dtype"]
-    )
     ndims = 2
     adims = ["&a_dim" + str(i) for i in range(ndims)]
     bdims = ["&b_dim" + str(i) for i in range(ndims)]
@@ -883,117 +747,68 @@ def gen_profiler(
         indent=2, dtype="int64_t", dim_info_dict=dim_info_dict, is_ptr=True
     )
 
+    file_pairs = []
     has_bias = bias_ptr_arg is not None
-    instance_name_base = "GemmInstance"
-    exec_program = EXEC_TEMPLATE.render(
-        indent="  ",
-        instance=instance_name_base,
-        is_profiler=True,
-        support_split_k=support_split_k,
-        problem_args=problem_args_template.render(
-            elem_input_type=elem_input_type,
-            elem_output_type=elem_output_type,
-        ),
-    )
-    input_output_checks = INPUT_OUTPUT_CHECKS_TEMPLATE.render(
-        input_ndims=ndims,
-        weight_ndims=ndims,
-        output_ndims=ndims,
-    )
-
-    function_name = "gemm"
-    instances = []
-    benchmark_instances = []
-    for instance_idx, (op_name, op) in enumerate(op_instance.items()):
+    for op_name, op in op_instance.items():
         config = emit_instance(op, for_profiler=True)
         config_name = extract_config_name(config)
-        instance_name = f"{instance_name_base}_{instance_idx}"
-        gemm_op = f"gemm_op_{instance_idx}"
+        name = "GemmInstance"
         instance = INSTANCE_TEMPLATE.render(
-            config_name=config_name, name=instance_name, config=config
+            config_name=config_name, name=name, config=config
         )
-        benchmark_instance = BENCHMARK_INSTANCE_TEMPLATE.render(
+        exec_program = EXEC_TEMPLATE.render(
             indent="  ",
-            instance_name=instance_name,
-            gemm_op=gemm_op,
-            gemm_op_name=op_name,
-            func_name=f"benchmark_{function_name}",
-            a_ptr="memory_pool->RequestTensorByIdx(0)",
-            b_ptr="memory_pool->RequestTensorByIdx(1)",
+            instance=name,
+            is_profiler=True,
+            support_split_k=support_split_k,
+            problem_args=problem_args_template.render(),
+        )
+        input_output_checks = INPUT_OUTPUT_CHECKS_TEMPLATE.render(
+            input_ndims=ndims,
+            weight_ndims=ndims,
+            output_ndims=ndims,
+        )
+        op_func = src_template.render(
+            instances=instance,
+            function_name="gemm",
+            input_ndims=ndims,
+            weight_ndims=ndims,
+            output_ndims=ndims,
+            shape_eval=shape_func,
+            input_output_checks=input_output_checks,
+            exec_paths=exec_program,
+            output_addr_calculator=output_addr_calculator,
+            support_split_k=support_split_k,
+            extra_code=extra_code,
+        )
+        func_call = FUNC_CALL_TEMPLATE.render(
+            func_name="gemm",
+            a_ptr="memory_pool->RequestHalfTensorByIdx(0)",
+            b_ptr="memory_pool->RequestHalfTensorByIdx(1)",
             has_bias=has_bias,
             bias_ptr=bias_ptr_arg,
-            c_ptr="memory_pool->RequestTensorByIdx(2)",
-            support_split_k=support_split_k,
+            c_ptr="memory_pool->RequestHalfTensorByIdx(2)",
             split_k="split_k",
             adims=adims,
             bdims=bdims,
             cdims=cdims,
         )
-        instances.append(instance)
-        benchmark_instances.append(benchmark_instance)
-    # TODO: Render args_parse by caller.
-    args_parse = (
-        args_parser_template
-        if isinstance(args_parser_template, str)
-        else args_parser_template.render()
-    )
-    op_func = src_template.render(
-        is_profiler=True,
-        instances="\n".join(instances),
-        function_name=function_name,
-        input_ndims=ndims,
-        weight_ndims=ndims,
-        output_ndims=ndims,
-        shape_eval=shape_func,
-        input_output_checks=input_output_checks,
-        exec_paths=exec_program,
-        output_addr_calculator=output_addr_calculator,
-        support_split_k=support_split_k,
-        extra_code=extra_code,
-    )
-    benchmark_adims = ["a_dim" + str(i) for i in range(ndims)]
-    benchmark_bdims = ["b_dim" + str(i) for i in range(ndims)]
-    benchmark_cdims = ["c_dim" + str(i) for i in range(ndims)]
-    func_call = FUNC_CALL_TEMPLATE.render(
-        is_profiler=True,
-        func_name=function_name,
-        a_ptr="a_ptr",
-        b_ptr="b_ptr",
-        has_bias=has_bias,
-        bias_ptr="bias_ptr",
-        c_ptr="c_ptr",
-        split_k="split_k",
-        adims=benchmark_adims,
-        bdims=benchmark_bdims,
-        cdims=benchmark_cdims,
-    )
-    tensor_decl = TENSOR_DECL_TEMPLATE.render(
-        elem_input_type=elem_input_type,
-        elem_output_type=elem_output_type,
-        has_bias=has_bias,
-    )
-    code = PROFILER_TEMPLATE.render(
-        op_func=op_func,
-        has_bias=has_bias,
-        has_d=has_d(func_attrs),
-        support_split_k=support_split_k,
-        args_parse=args_parse,
-        function_name=function_name,
-        input_ndims=ndims,
-        weight_ndims=ndims,
-        output_ndims=ndims,
-        func_call=func_call,
-        name=instance_name_base,
-        tensor_decl=tensor_decl,
-        benchmark_instances="\n".join(benchmark_instances),
-        elem_type=elem_type,
-    )
-    # FIXME: remove file_pairs once we have make -j ready for building
-    # an entire graph
-    file_pairs = []
-    add_profiler(file_pairs, workdir, op_type, profiler_filename, code)
+        # TODO: Render args_parse by caller.
+        args_parse = (
+            args_parser_template
+            if isinstance(args_parser_template, str)
+            else args_parser_template.render()
+        )
+        code = PROFILER_TEMPLATE.render(
+            op_func=op_func,
+            args_parse=args_parse,
+            func_call=func_call,
+            name=name,
+            tensor_decl=TENSOR_DECL_TEMPLATE.render(name=name, has_bias=has_bias),
+        )
+        add_profiler(file_pairs, workdir, op_type, op_name, code)
     # build
-    return build_profiler(file_pairs)
+    build_profiler(file_pairs)
 
 
 def gen_local_dim_defs(func_attrs, indent="  "):
@@ -1049,24 +864,22 @@ def gen_function_call(func_attrs, indent="  ", bias_ptr_arg=None):
     )
 
 
-def default_fproc(
-    *, op, a_layout, b_layout, c_layout, elem_type, epiligue_name, permute_layout=None
-):
+def default_fproc_f16(*, op, a_layout, b_layout, c_layout, epiligue_name):
     import copy
 
     import cutlass_lib
 
     ret = []
-    data_type = elem_type
+    data_type = cutlass_lib.library.DataType.f16
     acc_type = cutlass_lib.library.DataType.f32
     # check target use fp16 acc
-    if "use_fp16_acc" in Target.current()._kwargs and data_type == "cutlass::half_t":
+    if "use_fp16_acc" in Target.current()._kwargs:
         if Target.current()._kwargs["use_fp16_acc"]:
             acc_type = cutlass_lib.library.DataType.f16
     if (
-        cutlass_lib.library.DataTypeTag[op.A.element] == data_type
-        and cutlass_lib.library.DataTypeTag[op.B.element] == data_type
-        and cutlass_lib.library.DataTypeTag[op.C.element] == data_type
+        op.A.element == data_type
+        and op.B.element == data_type
+        and op.C.element == data_type
         and op.accumulator_type() == acc_type
         and op.A.layout == a_layout
         and op.B.layout == b_layout
@@ -1077,10 +890,6 @@ def default_fproc(
         # set epilogue
         op.epilogue_functor = cutlass_lib.library.EpilogueFunctorName[epiligue_name]
         op.element_epilogue = acc_type
-        if permute_layout is not None:
-            op.permute_layout = cutlass_lib.library.EpiloguePermuteLayoutName[
-                permute_layout
-            ]
         # set C alignment
         for i in [8, 4, 2, 1]:
             op = copy.deepcopy(op)
@@ -1089,27 +898,23 @@ def default_fproc(
     return ret
 
 
-def make_fproc(func_attrs, layout):
+def make_fproc_f16(func_attrs, layout):
     """
     This function sets a callback for processing the epilogue of the kernel
     associated with func_attrs.
     """
 
-    backend_spec = CUDASpec()
-    elem_type = backend_spec.dtype_to_lib_type(func_attrs["inputs"][0]._attrs["dtype"])
-
-    def fproc(op):
+    def fproc_f16(op):
         a_layout, b_layout, c_layout = layout.cutlass_lib_layouts()
-        return default_fproc(
+        return default_fproc_f16(
             op=op,
             a_layout=a_layout,
             b_layout=b_layout,
             c_layout=c_layout,
-            elem_type=elem_type,
             epiligue_name=func_attrs["epilogue"],
         )
 
-    func_attrs["op_instance"] = extract_config(fproc)
+    func_attrs["op_instance"] = extract_config(fproc_f16)
 
 
 def function_filter(cfg, func_attrs, ab_alignment):

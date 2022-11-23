@@ -20,8 +20,6 @@ from .module import Module
 
 
 class Nhwc3to8(Module):
-    r"""Pads the input data with nhwc dimensions from 3 channels to 8 channels"""
-
     def __init__(self):
         super().__init__()
         self.op = nhwc3to8()

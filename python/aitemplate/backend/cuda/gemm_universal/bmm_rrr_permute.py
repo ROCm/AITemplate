@@ -19,7 +19,6 @@ A[RowMajor], B[RowMajor], bias / C[RowMajor]
 """
 
 from ... import registry
-from ...backend_spec import CUDASpec
 from ...common import gemm_common
 from . import bmm_common, bmm_permute_common, common, common_permute
 
@@ -28,31 +27,23 @@ from . import bmm_common, bmm_permute_common, common, common_permute
 
 @registry.reg("cuda.bmm_rrr_permute.config")
 def bmm_rrr_permute_config(func_attrs, dtype="float16"):
-    def fproc(op):
+    def fproc_f16(op):
         import cutlass_lib
 
-        from ...backend_spec import CUDASpec
-
-        backend_spec = CUDASpec()
-        elem_type = backend_spec.dtype_to_lib_type(
-            func_attrs["inputs"][0]._attrs["dtype"]
-        )
-
-        return common.default_fproc(
+        return common_permute.default_fproc_f16(
             op=op,
             a_layout=cutlass_lib.library.LayoutType.RowMajor,
             b_layout=cutlass_lib.library.LayoutType.RowMajor,
             c_layout=cutlass_lib.library.LayoutType.RowMajor,
-            elem_type=elem_type,
             epiligue_name=func_attrs["epilogue"],
             permute_layout=func_attrs["layout"],
         )
 
-    func_attrs["op_instance"] = common_permute.extract_config(fproc, func_attrs)
+    func_attrs["op_instance"] = common_permute.extract_config(fproc_f16, func_attrs)
 
 
 @registry.reg("cuda.bmm_rrr_permute.gen_profiler")
-def gen_profiler(func_attrs, workdir, profiler_filename, dim_info_dict):
+def gen_profiler(func_attrs, workdir, dim_info_dict):
     a_dims = bmm_common.reverse_dim_info_mapping(
         dim_info_dict, gemm_common.Source.INPUT, 0
     )
@@ -87,10 +78,9 @@ def gen_profiler(func_attrs, workdir, profiler_filename, dim_info_dict):
         mm_info=bmm_problem_info,
     )
 
-    return bmm_permute_common.gen_profiler(
+    bmm_permute_common.gen_profiler(
         func_attrs,
         workdir,
-        profiler_filename,
         dim_info_dict,
         common.SRC_TEMPLATE,
         problem_args,
@@ -106,14 +96,6 @@ def gen_function(
     exec_cond_template,
     dim_info_dict,
 ):
-    backend_spec = CUDASpec()
-    elem_input_type = backend_spec.dtype_to_lib_type(
-        func_attrs["inputs"][0]._attrs["dtype"]
-    )
-    elem_output_type = backend_spec.dtype_to_lib_type(
-        func_attrs["outputs"][0]._attrs["dtype"]
-    )
-
     input_a_batch_stride_dim = "M * K"
     input_a_stride_k_dim = "K"
     input_a_offset = 0
@@ -176,10 +158,10 @@ def gen_function(
 
     bmm_problem_info = bmm_common.Bmm_problem_info(
         alpha_value=func_attrs.get("alpha", 1),
-        a_ptr="(" + elem_input_type + "*)(a_ptr) + input_a_offset",
-        b_ptr="(" + elem_input_type + "*)(b_ptr) + input_b_offset",
-        bias_ptr="(" + elem_output_type + "*)(c_ptr) + output_offset",
-        c_ptr="(" + elem_output_type + "*)(c_ptr) + output_offset",
+        a_ptr="(a_ptr + input_a_offset)",
+        b_ptr="(b_ptr + input_b_offset)",
+        bias_ptr="(c_ptr + output_offset)",
+        c_ptr="(c_ptr + output_offset)",
         a_batch_stride="input_a_batch_stride",
         b_batch_stride="input_b_batch_stride",
         bias_batch_stride="output_batch_stride",
@@ -193,9 +175,7 @@ def gen_function(
     b_shapes = func_attrs["input_accessors"][1].original_shapes
     bmm_common._update_stride_info(bmm_problem_info, a_shapes, b_shapes)
 
-    problem_args = bmm_common.PROBLEM_ARGS_TEMPLATE.render(
-        mm_info=bmm_problem_info,
-    )
+    problem_args = bmm_common.PROBLEM_ARGS_TEMPLATE.render(mm_info=bmm_problem_info)
 
     return bmm_permute_common.gen_function(
         func_attrs,

@@ -23,7 +23,7 @@ from aitemplate.utils import logger
 
 
 @unittest.skipIf(detect_target().name() == "rocm", "Not supported by ROCM.")
-class GroupGEMMRcrBiasActTestCase(unittest.TestCase):
+class GEMMTestCase(unittest.TestCase):
     def test_rcr_relu(self):
         M = 256
         K1 = 128

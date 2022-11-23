@@ -87,7 +87,7 @@ def common_gen_profiler(
     output_addr_calculator = common.DEFAULT_OUTPUT_ADDR_CALCULATOR.render(
         stride_dim="*b_dim0"
     )
-    return common_softmax.gen_profiler(
+    common_softmax.gen_profiler(
         func_attrs,
         workdir,
         dim_info_dict,

@@ -1,4 +1,4 @@
-#  Copyright (c) Meta Platform, Inc. and its affiliates"""
+#  Copyright (c) Meta Platforms, Inc. and affiliates.
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
 #  you may not use this file except in compliance with the License.
@@ -132,7 +132,6 @@ class nmsTestCase(unittest.TestCase):
         rebuild=True,
         test_name="efficient_nms",
         benchmark_shapes=False,
-        copy_op=False,
     ):
         X1 = Tensor(
             shape=[batch_size, N, num_classes, 4],
@@ -148,15 +147,12 @@ class nmsTestCase(unittest.TestCase):
             is_input=True,
         )
 
-        OP = ops.efficient_nms(
+        Y = ops.efficient_nms(
             preNmsTop=preNmsTop,
             nmsMaxOut=nmsMaxOut,
             iouThreshold=iouThreshold,
             minBoxSize=minBoxSize,
-        )
-        if copy_op:
-            OP = ops.efficient_nms(**OP._get_op_attributes())
-        Y = OP(X1, X2)
+        )(X1, X2)
         mark_output(Y)
 
         boxes, scores = self._create_tensors(N, rand=rand_box)
@@ -251,7 +247,6 @@ class nmsTestCase(unittest.TestCase):
         #     test_name="nms1",
         # )
 
-        """
         self._test_nms(
             N=30,
             preNmsTop=30,
@@ -263,7 +258,6 @@ class nmsTestCase(unittest.TestCase):
             rand_box=False,
             test_name="nms1",
         )
-        """
         self._test_nms(
             N=30,
             preNmsTop=30,
@@ -274,18 +268,6 @@ class nmsTestCase(unittest.TestCase):
             num_classes=4,
             rand_box=False,
             test_name="nms2",
-        )
-        self._test_nms(
-            N=30,
-            preNmsTop=30,
-            nmsMaxOut=10,
-            iouThreshold=0.5,
-            minBoxSize=0,
-            batch_size=2,
-            num_classes=4,
-            rand_box=False,
-            test_name="nms2_copy_op",
-            copy_op=True,
         )
 
     @unittest.skip("manually enable it for benchmarking")

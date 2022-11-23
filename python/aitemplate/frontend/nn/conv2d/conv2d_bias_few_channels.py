@@ -13,16 +13,13 @@
 #  limitations under the License.
 #
 """
-conv2d bias for few channels
+conv2d bias relu module
 """
 from .special_conv2d_bias_act import SpecialConv2dBiasAct
 
 
 class Conv2dBiasFewChannels(SpecialConv2dBiasAct):
-    r"""Applies 2D convolution with bias for few channels.
-
-    This layer equals to Conv2dBias but has improved performance for in_channels < 8.
-    """
+    """functions for the op with conv2d+bias+relu pattern"""
 
     def __init__(
         self,

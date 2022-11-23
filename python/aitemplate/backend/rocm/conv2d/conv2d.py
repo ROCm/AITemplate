@@ -58,7 +58,7 @@ def conv2d_gen_profiler(func_attrs, workdir, shape_template):
         Generates shape calculation.
         The template is passed from compiler/ops/pool.
     """
-    return common.gen_profiler(
+    common.gen_profiler(
         func_attrs=func_attrs,
         workdir=workdir,
         shape_template=shape_template,

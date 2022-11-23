@@ -58,17 +58,11 @@ SRC_TEMPLATE = jinja2.Template(
 
 {{instances}}
 
-{% if is_profiler %}
-template <typename GemmInstance>
 void {{function_name}} (
-    GemmInstance& gemm_op,
-{% else %}
-void {{function_name}} (
-{% endif %}
-    void* a_ptr,
-    void* b_ptr,
-    void* bias_ptr,
-    void* c_ptr,
+    cutlass::half_t* a_ptr,
+    cutlass::half_t* b_ptr,
+    cutlass::half_t* bias_ptr,
+    cutlass::half_t* c_ptr,
     uint8_t* workspace,
 {% if support_split_k %}
     int split_k,
@@ -117,10 +111,10 @@ void {{function_name}} (
 FUNC_DECL_TEMPLATE = jinja2.Template(
     """
 void {{func_name}}(
-  void*,
-  void*,
-  void*,
-  void*,
+  cutlass::half_t*,
+  cutlass::half_t*,
+  cutlass::half_t*,
+  cutlass::half_t*,
   uint8_t*,
 {% if support_split_k %}
     int,
