@@ -24,8 +24,7 @@ profiler_runner.extract_profile_result = lambda _: (
 
 from time import sleep
 
-from aitemplate.backend.cuda.target_def import CUDA as CUDATarget
-
+from aitemplate.testing import detect_target
 from aitemplate.backend.profiler_runner import ProfilerRunner
 
 
@@ -56,7 +55,7 @@ def delegate_cb_wrapper(idx, value):
 
 class ProfilerTestCase(unittest.TestCase):
     def test_profiler_runner(self):
-        with CUDATarget() as _:
+        with detect_target() as _:
             pr = ProfilerRunner(
                 devices=[str(i) for i in range(12)],
                 timeout=60,

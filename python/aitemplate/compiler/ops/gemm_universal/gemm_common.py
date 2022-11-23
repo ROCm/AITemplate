@@ -504,6 +504,12 @@ class gemm(Operator):
                 target=target.name(), op=self._attrs["op"]
             )
             func = registry.get(func_key)
+            if target.name() == "rocm":
+                return func(
+                    self._attrs,
+                    workdir,
+                    self._extract_dims(for_profiling=True),
+                )
             profiler_filename = self._get_profiler_filename()
             logger.info(__name__, f"generating {profiler_filename=}")
             return func(
@@ -620,31 +626,61 @@ class gemm(Operator):
                 f"{op_type} {exec_entry_sha1}.\n",
                 "To bypass, you need to make it available in the db table.",
             )
-        profiler_filename = self._get_profiler_filename()
+        if target.name() == "rocm":
+            op_type = self._attrs["op"]
+            all_op_names = list(self._attrs["op_instance"].keys())
+            for op_name in all_op_names:
 
-        def _gen_callback(split_k):
-            def process_result_callback(result, postprocessing_delegate):
-                postprocessing_delegate.add_instance(
-                    (result, self._attrs, profiler_filename, exec_key, split_k)
-                )
+                def _gen_callback(split_k):
+                    def process_result_callback(result, postprocessing_delegate):
+                        postprocessing_delegate.add_instance(
+                            (result, self._attrs, op_name, exec_key, split_k)
+                        )
 
-            return process_result_callback
+                    return process_result_callback
 
-        command = self._gen_profile_cmd(profiler_prefix, profiler_filename, exec_key)
-
-        if self._attrs["op"].startswith("group_gemm") or self._attrs["op"].startswith(
-            "bmm"
-        ):
-            profiler_runner.push(command, _gen_callback(split_k=1))
+                command = self._gen_profile_cmd(profiler_prefix, op_name, exec_key)
+                if self._attrs["op"].startswith("group_gemm") or self._attrs[
+                    "op"
+                ].startswith("bmm"):
+                    profiler_runner.push(command, _gen_callback(split_k=1))
+                else:
+                    m, n, k = gemm_inverse_key_func(exec_key)[-3:]
+                    if "split_k_hints" in self._attrs:
+                        split_k_search_space = self._attrs["split_k_hints"]
+                    else:
+                        split_k_search_space = self._split_k_search_space(m, n, k)
+                    for split_k in split_k_search_space:
+                        gemm_command = command + [str(split_k)]
+                        profiler_runner.push(gemm_command, _gen_callback(split_k))
         else:
-            m, n, k = gemm_inverse_key_func(exec_key)[-3:]
-            if "split_k_hints" in self._attrs:
-                split_k_search_space = self._attrs["split_k_hints"]
+            profiler_filename = self._get_profiler_filename()
+
+            def _gen_callback(split_k):
+                def process_result_callback(result, postprocessing_delegate):
+                    postprocessing_delegate.add_instance(
+                        (result, self._attrs, profiler_filename, exec_key, split_k)
+                    )
+
+                return process_result_callback
+
+            command = self._gen_profile_cmd(
+                profiler_prefix, profiler_filename, exec_key
+            )
+
+            if self._attrs["op"].startswith("group_gemm") or self._attrs[
+                "op"
+            ].startswith("bmm"):
+                profiler_runner.push(command, _gen_callback(split_k=1))
             else:
-                split_k_search_space = self._split_k_search_space(m, n, k)
-            for split_k in split_k_search_space:
-                gemm_command = command + [str(split_k)]
-                profiler_runner.push(gemm_command, _gen_callback(split_k))
+                m, n, k = gemm_inverse_key_func(exec_key)[-3:]
+                if "split_k_hints" in self._attrs:
+                    split_k_search_space = self._attrs["split_k_hints"]
+                else:
+                    split_k_search_space = self._split_k_search_space(m, n, k)
+                for split_k in split_k_search_space:
+                    gemm_command = command + [str(split_k)]
+                    profiler_runner.push(gemm_command, _gen_callback(split_k))
 
     def profile(
         self,
@@ -828,7 +864,6 @@ class GemmProfilerPostprocessingDelegate:
                 exec_key,
                 split_k,
             ) = min_runtime_results
-
             func_attrs["exec_path"][exec_key].algo = best_algo
             func_attrs["workspace"] = max(func_attrs["workspace"], workspace)
             func_attrs["split_k"] = split_k
