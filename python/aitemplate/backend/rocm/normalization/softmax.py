@@ -59,25 +59,22 @@ EXEC_TEMPLATE = jinja2.Template(
 {% endfor %}
     i_inStrides.push_back(1);
     auto device_instance = {{instance}}{};
-    auto argument_ptr = device_instance.MakeArgumentPointer(i_inLengths,
-                                                            i_inStrides,
-                                                            reduceDims,
-                                                            &alpha,
-                                                            &beta,
-                                                            static_cast<ck::half_t *>(input),
-                                                            static_cast<ck::half_t *>(output),
-                                                            ck::tensor_operation::element_wise::PassThrough{},
-                                                            ck::tensor_operation::element_wise::PassThrough{}
-                                                            );
-    if(!device_instance.IsSupportedArgument(argument_ptr.get()))
+    auto argument = device_instance.MakeArgument(i_inLengths,
+                                                 i_inStrides,
+                                                 reduceDims,
+                                                 &alpha,
+                                                 &beta,
+                                                 static_cast<ck::half_t *>(input),
+                                                 static_cast<ck::half_t *>(output),
+                                                 ck::tensor_operation::element_wise::PassThrough{},
+                                                 ck::tensor_operation::element_wise::PassThrough{}
+                                                 );
+    if(!device_instance.IsSupportedArgument(argument))
     {
-        auto ss = std::stringstream(); 
-        ss << "wrong! " << device_instance.GetTypeString() << " with the specified compilation parameters does not support this Softmax problem.";
-        throw std::runtime_error(ss.str());
+        LOG(FATAL) << "wrong! " << device_instance.GetTypeString() << " with the specified compilation parameters does not support this Softmax problem.";
     };
-    std::string instance_name = device_instance.GetTypeString();
-    auto invoker_ptr = device_instance.MakeInvokerPointer();
-    invoker_ptr->Run(argument_ptr.get(), StreamConfig{stream, false});
+    auto invoker = device_instance.MakeInvoker();
+    invoker.Run(argument, StreamConfig{stream, false});
     return;
 """
 )

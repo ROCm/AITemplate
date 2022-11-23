@@ -31,24 +31,22 @@ ck::half_t, ck::half_t, float, {{reduce_func}}, false, 64, 64, 1, 4, 1, 4>;
 EXEC_TEMPLATE = jinja2.Template(
     """
 {{indent}}auto op =  {{instance}}{};
-{{indent}}auto invoker_ptr  = op.MakeInvokerPointer();
-{{indent}}auto argument_ptr = op.MakeArgumentPointer(static_cast<ck::half_t *>(in_ptr),
-{{indent}}                                           static_cast<ck::half_t *>(out_ptr),
-{{indent}}                                           nullptr,
-{{indent}}                                           *batch,
-{{indent}}                                           *in_ch,
-{{indent}}                                           input_shape,
-{{indent}}                                           kernel_shape,
-{{indent}}                                           output_shape,
-{{indent}}                                           conv_filter_strides,
-{{indent}}                                           input_left_pads,
-{{indent}}                                           input_right_pads);
-{{indent}}if(!op.IsSupportedArgument(argument_ptr.get())) {
-{{indent}}  auto ss = std::stringstream(); 
-{{indent}}  ss << "wrong! " << op.GetTypeString() << " with the specified compilation parameters does not support this Pool problem.";
-{{indent}}  throw std::runtime_error(ss.str());
+{{indent}}auto invoker  = op.MakeInvoker();
+{{indent}}auto argument = op.MakeArgument(static_cast<ck::half_t *>(in_ptr),
+{{indent}}                                static_cast<ck::half_t *>(out_ptr),
+{{indent}}                                nullptr,
+{{indent}}                                *batch,
+{{indent}}                                *in_ch,
+{{indent}}                                input_shape,
+{{indent}}                                kernel_shape,
+{{indent}}                                output_shape,
+{{indent}}                                conv_filter_strides,
+{{indent}}                                input_left_pads,
+{{indent}}                                input_right_pads);
+{{indent}}if(!op.IsSupportedArgument(argument)) {
+{{indent}}  LOG(FATAL) << "wrong! " << op.GetTypeString() << " with the specified compilation parameters does not support this Pool problem.";
 {{indent}}}
-{{indent}}invoker_ptr->Run(argument_ptr.get(), StreamConfig{stream, false});
+{{indent}}invoker.Run(argument, StreamConfig{stream, false});
 {{indent}}return;
 """
 )

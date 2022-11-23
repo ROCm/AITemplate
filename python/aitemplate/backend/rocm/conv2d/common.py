@@ -89,13 +89,7 @@ EXEC_TEMPLATE = jinja2.Template(
 {{problem_args}}
 {{indent}});
 {{indent}}if(!op.IsSupportedArgument(argument)) {
-<<<<<<< HEAD
-{{indent}}  auto ss = std::stringstream();
-{{indent}}  ss << "wrong! " << op.GetTypeString() << " with the specified compilation parameters does not support this Conv problem.";
-{{indent}}  throw std::runtime_error(ss.str());
-=======
-{{indent}}    LOG(FATAL) << "wrong! device_conv with the specified compilation parameters does not support this Conv problem";
->>>>>>> optimize debug, add erro file line and format profile command
+{{indent}}  LOG(FATAL) << "wrong! " << op.GetTypeString() << " with the specified compilation parameters does not support this Conv problem.";
 {{indent}}}
 {% if is_profiler %}
 {{indent}}auto workspace_size = op.GetWorkSpaceSize(&argument);
