@@ -21,6 +21,7 @@ from . import (
     conv2d_bias_add_relu,
     conv2d_bias_relu,
     conv2d_bias_sigmoid,
+    conv2d_bias_fastgelu,
     transposed_conv2d,
     transposed_conv2d_bias_relu,
 )
@@ -31,6 +32,7 @@ __all__ = [
     "conv2d_bias_add_relu",
     "conv2d_bias_relu",
     "conv2d_bias_sigmoid",
+    "conv2d_bias_fastgelu",
     "transposed_conv2d",
     "transposed_conv2d_bias_relu",
 ]

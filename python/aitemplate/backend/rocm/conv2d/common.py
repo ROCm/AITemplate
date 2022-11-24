@@ -76,6 +76,8 @@ PROBLEM_ARGS_TEMPLATE = jinja2.Template(
 {{indent}}                                ck::tensor_operation::element_wise::AddRelu{}
 {% elif conv2d_flag == "bias_sigmoid" %}
 {{indent}}                                ck::tensor_operation::element_wise::AddSigmoid{}
+{% elif conv2d_flag == "bias_fastgelu" %}
+{{indent}}                                ck::tensor_operation::element_wise::AddFastGelu{}
 {% elif conv2d_flag == "bias_add_relu" %}
 {{indent}}                                ck::tensor_operation::element_wise::AddAddRelu{}
 {% endif %}

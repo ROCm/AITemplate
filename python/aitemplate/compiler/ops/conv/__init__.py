@@ -27,6 +27,7 @@ from .conv2d_bias_hardswish_few_channels import conv2d_bias_hardswish_few_channe
 from .conv2d_bias_relu import conv2d_bias_relu
 from .conv2d_bias_relu_few_channels import conv2d_bias_relu_few_channels
 from .conv2d_bias_sigmoid import conv2d_bias_sigmoid
+from .conv2d_bias_fastgelu import conv2d_bias_fastgelu
 from .transposed_conv2d import transposed_conv2d
 from .transposed_conv2d_bias import transposed_conv2d_bias
 from .transposed_conv2d_bias_relu import transposed_conv2d_bias_relu
