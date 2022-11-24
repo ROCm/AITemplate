@@ -228,6 +228,7 @@ class Conv2dKind(enum.Enum):
     Conv2dBiasRelu = auto()
     Conv2dBiasReluAdd = auto()
     Conv2dBiasSigmoid = auto()
+    Conv2dBiasFastGelu = auto()
     GroupConv2dBiasRelu = auto()
     TransposedConv2d = auto()
     TransposedConv2dBiasRelu = auto()
@@ -238,6 +239,7 @@ Conv2dKindNames = {
     Conv2dKind.Conv2dBiasRelu: "conv2d_bias_relu",
     Conv2dKind.Conv2dBiasReluAdd: "conv2d_bias_relu_add",
     Conv2dKind.Conv2dBiasSigmoid: "conv2d_bias_sigmoid",
+    Conv2dKind.Conv2dBiasFastGelu: "conv2d_bias_fastgelu",
     Conv2dKind.GroupConv2dBiasRelu: "group_conv2d_bias_relu",
     Conv2dKind.TransposedConv2d: "transposed_conv2d",
     Conv2dKind.TransposedConv2dBiasRelu: "transposed_conv2d_bias_relu",

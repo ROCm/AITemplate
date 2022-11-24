@@ -174,7 +174,7 @@ class BackendSpec:
                 "half": "hsilu",
                 "float": "fsilu",
             },
-            FuncEnum.FASTGELU: {"half2": "fast_gelu", "half": "fast_gelu", "float": "fast_gelu"},
+            FuncEnum.FASTGELU: {"half2": "fastgelu", "half": "fastgelu", "float": "fastgelu"},
         }
     )
 

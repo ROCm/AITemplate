@@ -23,6 +23,7 @@ from ..ops.conv import (
     conv2d_bias_relu,
     conv2d_bias_relu_few_channels,
     conv2d_bias_sigmoid,
+    conv2d_bias_fastgelu,
     transposed_conv2d,
     transposed_conv2d_bias,
     transposed_conv2d_bias_relu,
@@ -67,6 +68,14 @@ def get_conv2d_bias_elementwise_patterns():
             ),
             conv2d_bias_sigmoid,
         ),
+        (
+            (
+                conv2d_bias(stride=1, pad=0),
+                elementwise(FuncEnum.FASTGELU),
+            ),
+            conv2d_bias_fastgelu,
+        ),
+        
     ]
 
     transposed_conv2d_bias_patterns = [

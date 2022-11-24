@@ -159,14 +159,14 @@ h2hard_tanh(const half2 a, const half2 min_val, const half2 max_val) {
           *reinterpret_cast<const half*>(&max_val.y)));
 }
 
-__device__ float fast_gelu(float a) {
+__device__ float fastgelu(float a) {
   const float u = 2.f * a * (0.035677f * a * a + 0.797885f);
   const float emu = exp(-u);
   const float cdf = 0.5f + 0.5f * (2.f / (1.f + emu) - 1.f);
   return a * cdf;
 }
 
-__device__ half fast_gelu(half a) {
+__device__ half fastgelu(half a) {
   // y = 0.5x * (1 + tanh(sqrt(2/Pi) * (x + 0.044715x^3)))
   const half half_val = constant_half();
   const half alpha = hrsqrt(__hdiv(half(2), constant_pi()));
@@ -177,7 +177,7 @@ __device__ half fast_gelu(half a) {
   return __hmul(__hmul(a, half_val), y);
 }
 
-__device__ half2 fast_gelu(half2 a) {
+__device__ half2 fastgelu(half2 a) {
   // y = 0.5x * (1 + tanh(sqrt(2/Pi) * (x + 0.044715x^3)))
   const half2 half2_val = half2(constant_half(), constant_half());
   const half2 alpha =

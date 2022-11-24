@@ -2075,6 +2075,13 @@ def GenerateTensorOp(manifest):
         library.TensorOperation.AddSigmoid,
         library.MemoryDataOperation.MemorySet,
     )
+    # Conv2dBiasFastGelu
+    CreateConv2dFwdOperator(
+        manifest,
+        library.Conv2dKind.GroupConv2dBiasRelu,
+        library.TensorOperation.AddFastGelu,
+        library.MemoryDataOperation.MemorySet,
+    )
     # TranposedConv2d
     CreateConv2dBwdOperator(
         manifest,
