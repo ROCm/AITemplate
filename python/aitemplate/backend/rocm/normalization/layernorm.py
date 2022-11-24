@@ -66,14 +66,21 @@ EXEC_TEMPLATE = jinja2.Template(
     """
     std::vector<ck::index_t> i_inStrides;
     std::vector<ck::index_t> i_outStrides;
+    {% if input_strides is defined %}
+    i_inStrides.push_back({{input_strides[-2]}});
+    i_inStrides.push_back({{input_strides[-1]}});
+    {% else %}
+    i_inStrides.push_back(N);
+    i_inStrides.push_back(1);
+    {% endif %}
 
-    {% for stride in input_strides %}
-        i_inStrides.push_back({{stride}});
-    {% endfor %}
-
-    {% for stride in output_strides %}
-        i_outStrides.push_back({{stride}});
-    {% endfor %}
+    {% if output_strides is defined %}
+    i_outStrides.push_back({{output_strides[-2]}});
+    i_outStrides.push_back({{output_strides[-1]}});
+    {% else %}
+    i_outStrides.push_back(N);
+    i_outStrides.push_back(1);
+    {% endif %}
 
     auto device_instance = {{instance}}{};
     auto argument_ptr = device_instance.MakeArgumentPointer(
@@ -84,10 +91,10 @@ EXEC_TEMPLATE = jinja2.Template(
         i_outStrides,
         {1},
         {{eps}},
-        static_cast<ck::half_t *>(input) + {{input_offset}},
+        static_cast<ck::half_t *>(input) + {{ input_offset if input_offset is defined else 0 }},
         static_cast<ck::half_t *>(gamma),
         static_cast<ck::half_t *>(beta),
-        static_cast<ck::half_t *>(output) + {{output_offset}},
+        static_cast<ck::half_t *>(output) + {{ output_offset if output_offset is defined else 0 }},
         ck::tensor_operation::element_wise::PassThrough{}
     );
 
