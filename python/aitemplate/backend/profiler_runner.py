@@ -88,8 +88,8 @@ def process_task(task: Task) -> None:
     stderr = task._stderr
     if len(stderr) > 0:
         cmd = task._cmd
-        if Target.current().name() == 'rocm':
-            cmd = ' '.join(cmd)
+        if Target.current().name() == "rocm":
+            cmd = " ".join(cmd)
         logger.debug(
             __name__,
             "Failed: [{name}][{algo}]\ncmd:\n{cmd}\nstderr:\n{stderr}".format(
