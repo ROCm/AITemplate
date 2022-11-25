@@ -23,24 +23,6 @@
 #define __HALF_TO_US(var) *(reinterpret_cast<unsigned short*>(&(var)))
 #endif
 
-// Return 1
-__device__ half one() {
-  uint16_t bits = 0x3c00u;
-  return reinterpret_cast<half const&>(bits);
-}
-
-// Returns (1/2)  (specialization for half_t)
-__device__ half constant_half() {
-  uint16_t bits = 0x3800u;
-  return reinterpret_cast<half const&>(bits);
-}
-
-// Returns pi, approximately 3.141  (specialization for half_t)
-__device__ half constant_pi() {
-  uint16_t bits = 0x4248u;
-  return reinterpret_cast<half const&>(bits);
-}
-
 template <typename T>
 __device__ T sign_custom(const T a) {
   return T(a > T(0)) - T(a < T(0));
@@ -67,6 +49,18 @@ __device__ half fast_tanh(half x) {
   const half emu = hexp(u);
   const half cdf = __hsub(half(1), __hdiv(half(2), __hadd(half(1), emu)));
   return cdf;
+}
+
+// Return 1
+__device__ half one() {
+  uint16_t bits = 0x3c00u;
+  return reinterpret_cast<half const&>(bits);
+}
+
+/// Returns (1/2)  (specialization for half_t)
+__device__ half constant_half() {
+  uint16_t bits = 0x3800u;
+  return reinterpret_cast<half const&>(bits);
 }
 
 __device__ float fsigmoid_custom(const float a) {
@@ -160,7 +154,6 @@ h2hard_tanh(const half2 a, const half2 min_val, const half2 max_val) {
 }
 
 __device__ float f_fast_gelu(float a) {
-  // y = 0.5x * (1 + tanh(sqrt(2/Pi) * (x + 0.044715x^3)))
   ck::tensor_operation::element_wise::AddFastGelu gelu_op;
   return gelu_op.GetFastGeLU(a);
 }
@@ -168,6 +161,20 @@ __device__ float f_fast_gelu(float a) {
 __device__ half h_fast_gelu(half a) {
   ck::tensor_operation::element_wise::AddFastGelu gelu_op;
   return static_cast<half>(gelu_op.GetFastGeLU(static_cast<ck::half_t>(a)));
+}
+
+__device__ half replace_if_inf(
+    const half a,
+    const half inf_replace,
+    const half neginf_replace) {
+  auto is_inf = __hisinf(a);
+  if (is_inf == -1) {
+    return neginf_replace;
+  }
+  if (is_inf == 1) {
+    return inf_replace;
+  }
+  return a;
 }
 
 __device__ float replace_if_inf(
