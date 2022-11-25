@@ -159,37 +159,15 @@ h2hard_tanh(const half2 a, const half2 min_val, const half2 max_val) {
           *reinterpret_cast<const half*>(&max_val.y)));
 }
 
-__device__ float fastgelu(float a) {
-  const float u = 2.f * a * (0.035677f * a * a + 0.797885f);
-  const float emu = exp(-u);
-  const float cdf = 0.5f + 0.5f * (2.f / (1.f + emu) - 1.f);
-  return a * cdf;
+__device__ float f_fast_gelu(float a) {
+  // y = 0.5x * (1 + tanh(sqrt(2/Pi) * (x + 0.044715x^3)))
+  ck::tensor_operation::element_wise::AddFastGelu gelu_op;
+  return gelu_op.GetFastGeLU(a);
 }
 
-__device__ half fastgelu(half a) {
-  // y = 0.5x * (1 + tanh(sqrt(2/Pi) * (x + 0.044715x^3)))
-  const half half_val = constant_half();
-  const half alpha = hrsqrt(__hdiv(half(2), constant_pi()));
-  const half a_cube = __hmul(__hmul(a, a), a);
-  const half y = __hadd(
-      half(1),
-      fast_tanh(__hmul(alpha, __hadd(a, __hmul(half(0.044715f), a_cube)))));
-  return __hmul(__hmul(a, half_val), y);
-}
-
-__device__ half2 fastgelu(half2 a) {
-  // y = 0.5x * (1 + tanh(sqrt(2/Pi) * (x + 0.044715x^3)))
-  const half2 half2_val = half2(constant_half(), constant_half());
-  const half2 alpha =
-      h2rsqrt(__h2div(half2(2), half2(constant_pi(), constant_pi())));
-  const half2 a_cube = __hmul2(__hmul2(a, a), a);
-  const half2 y = __hadd2(
-      half2(1),
-      fast_tanh(__hmul2(
-          alpha,
-          __hadd2(
-              a, __hmul2(half2(half(0.044715f), half(0.044715f)), a_cube)))));
-  return __hmul2(__hmul2(a, half2_val), y);
+__device__ half h_fast_gelu(half a) {
+  ck::tensor_operation::element_wise::AddFastGelu gelu_op;
+  return static_cast<half>(gelu_op.GetFastGeLU(static_cast<ck::half_t>(a)));
 }
 
 __device__ float replace_if_inf(
