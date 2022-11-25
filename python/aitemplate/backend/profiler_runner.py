@@ -96,12 +96,15 @@ def process_task(task: Task) -> None:
         if not single_file_profiler:
             task._failed = True
             return
+        cmd = task._cmd
+        if Target.current().name() == "rocm":
+            cmd = " ".join(cmd)
         logger.debug(
             __name__,
             "Failed: [{name}][{algo}]\ncmd:\n{cmd}\nstderr:\n{stderr}".format(
                 name=task._name,
                 algo=task._idx,
-                cmd=task._cmd,
+                cmd=cmd,
                 stderr=stderr,
             ),
         )

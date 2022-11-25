@@ -864,10 +864,6 @@ class GemmProfilerPostprocessingDelegate:
                 exec_key,
                 split_k,
             ) = min_runtime_results
-<<<<<<< HEAD
-
-=======
->>>>>>> sync upstream v0.1.1 (#15)
             func_attrs["exec_path"][exec_key].algo = best_algo
             func_attrs["workspace"] = max(func_attrs["workspace"], workspace)
             func_attrs["split_k"] = split_k
