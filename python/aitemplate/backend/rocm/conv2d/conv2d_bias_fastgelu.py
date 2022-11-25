@@ -1,5 +1,5 @@
 """
-ROCM codegen functions for conv2d_bias_relu.
+ROCM codegen functions for conv2d_bias_fastgelu.
 """
 from ... import registry
 from . import common
