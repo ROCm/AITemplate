@@ -27,4 +27,3 @@ class Conv2dBiasFastGelu(Conv2dBiasAct):
             groups,
             dtype,
         )
-        

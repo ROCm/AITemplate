@@ -55,4 +55,4 @@ class conv2d_bias_fastgelu(conv2d_bias_activation):
             Number of input channels to process to compute one output channel, by default 1
         """
         super().__init__("fastgelu", stride, pad, dilate=dilate, group=group)
-               
+              
