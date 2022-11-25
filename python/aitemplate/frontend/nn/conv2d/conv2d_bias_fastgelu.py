@@ -1,5 +1,5 @@
 """
-conv bias hardswish module
+conv bias fastgelu module
 """
 from .common_conv2d_bias_act import Conv2dBiasAct
 
