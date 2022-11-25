@@ -27,10 +27,14 @@ from ...target import Target
 
 INPUT_ADDR_CALCULATOR = jinja2.Template(
     """
-  stride_a = {{accessor_a.stride(1)}};
-  offset_a = {{accessor_a.offset}}; // default to 0
-  stride_b = {{accessor_b.stride(1)}};
-  offset_b = {{accessor_b.offset}}; // default to 0
+    {% if accessor_a.is_from_strided_tensor %}
+      stride_a = {{accessor_a.stride(0)}};
+      offset_a = {{accessor_a.offset}}; // default to 0
+    {% endif %}
+    {% if accessor_b.is_from_strided_tensor %}
+      stride_b = {{accessor_b.stride(0)}};
+      offset_b = {{accessor_b.offset}}; // default to 0
+    {% endif %}
     """
 )
 
