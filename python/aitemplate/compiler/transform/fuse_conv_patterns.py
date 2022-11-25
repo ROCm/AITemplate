@@ -74,8 +74,7 @@ def get_conv2d_bias_elementwise_patterns():
                 elementwise(FuncEnum.FASTGELU),
             ),
             conv2d_bias_fastgelu,
-        ),
-        
+        ), 
     ]
 
     transposed_conv2d_bias_patterns = [
