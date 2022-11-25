@@ -88,11 +88,8 @@ EXEC_TEMPLATE = jinja2.Template(
 
     if(!device_instance.IsSupportedArgument(argument_ptr.get()))
     {
-        throw std::runtime_error(
-            "wrong! device_layernorm with the specified compilation parameters does "
-            "not support this Softmax problem");
+        LOG(FATAL) << "wrong! " << device_instance.GetTypeString() << " with the specified compilation parameters does not support this Layernorm problem.";
     };
-    std::string instance_name = device_instance.GetTypeString();
     auto invoker_ptr = device_instance.MakeInvokerPointer();
     invoker_ptr->Run(argument_ptr.get(), StreamConfig{stream, false});
     return;
@@ -195,7 +192,7 @@ def layernorm_gen_profiler(
         shapes[dim], IntImm
     ), "layernorm requires reduction dim to be static"
 
-    norm_common.gen_profiler(
+    return norm_common.gen_profiler(
         func_attrs,
         workdir,
         2,  # rank

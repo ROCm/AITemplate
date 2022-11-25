@@ -87,5 +87,17 @@ def nan_to_num(tensor: Any) -> Tensor:
     return OP_REGISTRY.get("NAN_TO_NUM")(tensor)
 
 
-def fastgelu(tensor: Any) -> Tensor:
+def pow(*args, **kwargs) -> Tensor:
+    return OP_REGISTRY.get("POW")(*args, **kwargs)
+
+
+def gelu(tensor: Any) -> Tensor:
+    return OP_REGISTRY.get("GELU")(tensor)
+
+
+def fast_gelu(tensor: Any) -> Tensor:
     return OP_REGISTRY.get("FASTGELU")(tensor)
+
+
+def softplus(tensor: Any) -> Tensor:
+    return OP_REGISTRY.get("SOFTPLUS")(tensor)

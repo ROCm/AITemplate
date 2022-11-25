@@ -36,7 +36,7 @@ class conv2d_bias_fastgelu(conv2d_bias_activation):
         B_pt = NHWC2NCHW(B_ait)
 
         Y = torch.nn.functional.conv2d(X_pt, W_pt, bias=B_pt)
-        Result_pt = torch.nn.functional.fastgelu(Y)
+        Result_pt = torch.nn.functional.gelu(Y)
         Result_ait = NCHW2NHWC(Result_pt)
     """
 

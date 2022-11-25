@@ -27,7 +27,7 @@ from .layout import RCR
 
 EXTRA_CODE = jinja2.Template(
     """
-#include "data_type.hpp"
+#include "ck/utility/data_type.hpp"
 
 namespace ck {
 namespace tensor_operation {
@@ -89,7 +89,7 @@ def gen_profiler(func_attrs, workdir, dim_info_dict):
         Generated from gemm._extract_dims().
         Used to store mapping between dim_names to input / output tensor dims.
     """
-    common.gen_profiler(
+    return common.gen_profiler(
         func_attrs=func_attrs,
         workdir=workdir,
         dim_info_dict=dim_info_dict,

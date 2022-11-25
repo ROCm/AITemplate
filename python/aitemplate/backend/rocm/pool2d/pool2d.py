@@ -44,9 +44,7 @@ EXEC_TEMPLATE = jinja2.Template(
 {{indent}}                                           input_left_pads,
 {{indent}}                                           input_right_pads);
 {{indent}}if(!op.IsSupportedArgument(argument_ptr.get())) {
-{{indent}}  throw std::runtime_error(
-{{indent}}    "wrong! device_conv with the specified compilation parameters does "
-{{indent}}    "not support this Conv problem");
+{{indent}}  LOG(FATAL) << "wrong! " << op.GetTypeString() << " with the specified compilation parameters does not support this Pool problem.";
 {{indent}}}
 {{indent}}invoker_ptr->Run(argument_ptr.get(), StreamConfig{stream, false});
 {{indent}}return;
@@ -60,6 +58,7 @@ SRC_TEMPLATE = jinja2.Template(
 #include <initializer_list>
 #include <cstdlib>
 #include <stdlib.h>
+#include "logging.h"
 #include "include/ck/utility/print.hpp"
 #include "library/include/ck/library/utility/device_memory.hpp"
 #include "library/include/ck/library/utility/host_tensor.hpp"
