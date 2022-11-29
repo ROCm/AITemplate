@@ -131,8 +131,8 @@ def bmm_gen_profiler(func_attrs, workdir, dim_info_dict):
         args_parse=ARGS_PARSER_TEMPLATE.render(),
         dim_info_dict=dim_info_dict,
         gemm_flag="bias",
-        problem_args_template=PROBLEM_ARGS_TEMPLATE, 
-        extra_header_template=EXTRA_HEADER_TEMPLATE
+        problem_args_template=PROBLEM_ARGS_TEMPLATE,
+        extra_header_template=EXTRA_HEADER_TEMPLATE,
     )
 
 
@@ -155,7 +155,14 @@ def bmm_gen_function(func_attrs, exec_cond_template, dim_info_dict):
     str
         The rendered template of generated function body.
     """
-    return bmm_common.gen_function(func_attrs, exec_cond_template, dim_info_dict, "bias", PROBLEM_ARGS_TEMPLATE, EXTRA_HEADER_TEMPLATE)
+    return bmm_common.gen_function(
+        func_attrs,
+        exec_cond_template,
+        dim_info_dict,
+        "bias",
+        PROBLEM_ARGS_TEMPLATE,
+        EXTRA_HEADER_TEMPLATE,
+    )
 
 
 @registry.reg("rocm.bmm_crr_add.func_decl")

@@ -1721,7 +1721,9 @@ def CreateBmmRRRAddOperator(manifest, c_element_op):
             + str(t.block_size)
         )
         a_block_descriptions.append(
-            gemm.BlockTransferDesc(a_block_transfer, [1, 0, 2], [1, 0, 2], 2, 8, 8, 1, True)
+            gemm.BlockTransferDesc(
+                a_block_transfer, [1, 0, 2], [1, 0, 2], 2, 8, 8, 1, True
+            )
         )
         c_block_descriptions.append(c_block_transfer)
     b_block_descriptions = [
@@ -1752,7 +1754,10 @@ def CreateBmmRRRAddOperator(manifest, c_element_op):
     e_dtype = library.DataType.f16
     for gemm_spec in gemm_specialization:
         for tile_desc, a_block_desc, b_block_desc, c_block_desc in zip(
-            tile_descriptions, a_block_descriptions, b_block_descriptions, c_block_descriptions
+            tile_descriptions,
+            a_block_descriptions,
+            b_block_descriptions,
+            c_block_descriptions,
         ):
             new_operation = gemm.GemmOperation(
                 operation_kind=operation_kind,
@@ -1771,7 +1776,7 @@ def CreateBmmRRRAddOperator(manifest, c_element_op):
                 c_block_transfer=c_block_desc,
                 ds_dtype=ds_dtype,
                 ds_layout=ds_layout,
-                e_dtype=e_dtype
+                e_dtype=e_dtype,
             )
             manifest.append(new_operation)
             operations.append(new_operation)
@@ -1794,20 +1799,20 @@ def CreateBmmCCRAddOperator(manifest, c_element_op):
     tile_descriptions = [
         gemm.TileDesc(256, 256, 128, 32, 2, 8, 32, 32, 4, 2),
         gemm.TileDesc(256, 256, 128, 32, 8, 8, 32, 32, 4, 2),
-        gemm.TileDesc(256,   128,   256,    32,   2,   8,   32,   32,    2,    4),
-        gemm.TileDesc(256,   128,   256,    32,   8,   8,   32,   32,    2,    4),
-        gemm.TileDesc(128,   128,   128,    32,   2,   8,   32,   32,    4,    2),
-        gemm.TileDesc(128,   128,   128,    32,   8,   8,   32,   32,    4,    2),
-        gemm.TileDesc(256,   128,   128,    32,   2,   8,   32,   32,    2,    2),
-        gemm.TileDesc(256,   128,   128,    32,   8,   8,   32,   32,    2,    2),
-        gemm.TileDesc(128,   128,    64,    32,   2,   8,   32,   32,    2,    2),
-        gemm.TileDesc(128,   128,    64,    32,   8,   8,   32,   32,    2,    2),
-        gemm.TileDesc(128,    64,   128,    32,   2,   8,   32,   32,    2,    2),
-        gemm.TileDesc(128,    64,   128,    32,   8,   8,   32,   32,    2,    2),
-        gemm.TileDesc(256,   128,    64,    32,   2,   8,   32,   32,    2,    1),
-        gemm.TileDesc(256,   128,    64,    32,   8,   8,   32,   32,    2,    1),
-        gemm.TileDesc(256,    64,   128,    32,   2,   8,   32,   32,    1,    2),
-        gemm.TileDesc(256,    64,   128,    32,   8,   8,   32,   32,    1,    2),
+        gemm.TileDesc(256, 128, 256, 32, 2, 8, 32, 32, 2, 4),
+        gemm.TileDesc(256, 128, 256, 32, 8, 8, 32, 32, 2, 4),
+        gemm.TileDesc(128, 128, 128, 32, 2, 8, 32, 32, 4, 2),
+        gemm.TileDesc(128, 128, 128, 32, 8, 8, 32, 32, 4, 2),
+        gemm.TileDesc(256, 128, 128, 32, 2, 8, 32, 32, 2, 2),
+        gemm.TileDesc(256, 128, 128, 32, 8, 8, 32, 32, 2, 2),
+        gemm.TileDesc(128, 128, 64, 32, 2, 8, 32, 32, 2, 2),
+        gemm.TileDesc(128, 128, 64, 32, 8, 8, 32, 32, 2, 2),
+        gemm.TileDesc(128, 64, 128, 32, 2, 8, 32, 32, 2, 2),
+        gemm.TileDesc(128, 64, 128, 32, 8, 8, 32, 32, 2, 2),
+        gemm.TileDesc(256, 128, 64, 32, 2, 8, 32, 32, 2, 1),
+        gemm.TileDesc(256, 128, 64, 32, 8, 8, 32, 32, 2, 1),
+        gemm.TileDesc(256, 64, 128, 32, 2, 8, 32, 32, 1, 2),
+        gemm.TileDesc(256, 64, 128, 32, 8, 8, 32, 32, 1, 2),
     ]
 
     b_block_descriptions = []
@@ -1832,7 +1837,9 @@ def CreateBmmCCRAddOperator(manifest, c_element_op):
             + str(t.block_size)
         )
         b_block_descriptions.append(
-            gemm.BlockTransferDesc(b_block_transfer, [1, 0, 2], [1, 0, 2], 2, 8, 8, 1, True)
+            gemm.BlockTransferDesc(
+                b_block_transfer, [1, 0, 2], [1, 0, 2], 2, 8, 8, 1, True
+            )
         )
         c_block_descriptions.append(c_block_transfer)
     a_block_descriptions = [
@@ -1863,7 +1870,10 @@ def CreateBmmCCRAddOperator(manifest, c_element_op):
     e_dtype = library.DataType.f16
     for gemm_spec in gemm_specialization:
         for tile_desc, a_block_desc, b_block_desc, c_block_desc in zip(
-            tile_descriptions, a_block_descriptions, b_block_descriptions, c_block_descriptions
+            tile_descriptions,
+            a_block_descriptions,
+            b_block_descriptions,
+            c_block_descriptions,
         ):
             new_operation = gemm.GemmOperation(
                 operation_kind=operation_kind,
@@ -1882,7 +1892,7 @@ def CreateBmmCCRAddOperator(manifest, c_element_op):
                 c_block_transfer=c_block_desc,
                 ds_dtype=ds_dtype,
                 ds_layout=ds_layout,
-                e_dtype=e_dtype
+                e_dtype=e_dtype,
             )
             manifest.append(new_operation)
             operations.append(new_operation)
@@ -1943,7 +1953,9 @@ def CreateBmmCRRAddOperator(manifest, c_element_op):
             + str(t.block_size)
         )
         b_block_descriptions.append(
-            gemm.BlockTransferDesc(b_block_transfer, [1, 0, 2], [1, 0, 2], 2, 8, 8, 1, True)
+            gemm.BlockTransferDesc(
+                b_block_transfer, [1, 0, 2], [1, 0, 2], 2, 8, 8, 1, True
+            )
         )
         c_block_descriptions.append(c_block_transfer)
     a_block_descriptions = [
@@ -1974,7 +1986,10 @@ def CreateBmmCRRAddOperator(manifest, c_element_op):
     e_dtype = library.DataType.f16
     for gemm_spec in gemm_specialization:
         for tile_desc, a_block_desc, b_block_desc, c_block_desc in zip(
-            tile_descriptions, a_block_descriptions, b_block_descriptions, c_block_descriptions
+            tile_descriptions,
+            a_block_descriptions,
+            b_block_descriptions,
+            c_block_descriptions,
         ):
             new_operation = gemm.GemmOperation(
                 operation_kind=operation_kind,
@@ -1993,7 +2008,7 @@ def CreateBmmCRRAddOperator(manifest, c_element_op):
                 c_block_transfer=c_block_desc,
                 ds_dtype=ds_dtype,
                 ds_layout=ds_layout,
-                e_dtype=e_dtype
+                e_dtype=e_dtype,
             )
             manifest.append(new_operation)
             operations.append(new_operation)
