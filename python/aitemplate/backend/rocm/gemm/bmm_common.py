@@ -21,13 +21,13 @@ from . import common
 
 EXTRA_SHAPE_TEMPLATE = jinja2.Template(
     """
-{{indent}}int64_t stride_a = *a_dim2;
-{{indent}}int64_t stride_b = *b_dim2;
-{{indent}}int64_t stride_c = *c_dim2;
+{{indent}}ck::index_t stride_a = *a_dim2;
+{{indent}}ck::index_t stride_b = *b_dim2;
+{{indent}}ck::index_t stride_c = *c_dim2;
 
-{{indent}}int64_t batch_stride_a = (*a_dim1) * stride_a;
-{{indent}}int64_t batch_stride_b = (*b_dim1) * stride_b;
-{{indent}}int64_t batch_stride_c = (*c_dim1) * stride_c;
+{{indent}}ck::index_t batch_stride_a = (*a_dim1) * stride_a;
+{{indent}}ck::index_t batch_stride_b = (*b_dim1) * stride_b;
+{{indent}}ck::index_t batch_stride_c = (*c_dim1) * stride_c;
 """
 )
 
