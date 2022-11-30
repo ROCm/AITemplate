@@ -1667,7 +1667,7 @@ def CreateBmmRRROperator(manifest):
     return operations
 
 
-def CreateBmmRRRAddOperator(manifest, c_element_op):
+def CreateBmmRRRBillinearOperator(manifest, c_element_op):
     operation_kind = library.GemmKind.BatchGemm
     a_element_desc = library.TensorDesc(
         library.DataType.f16, library.LayoutType.RowMajor
@@ -1783,7 +1783,7 @@ def CreateBmmRRRAddOperator(manifest, c_element_op):
     return operations
 
 
-def CreateBmmCCRAddOperator(manifest, c_element_op):
+def CreateBmmCCRBillinearOperator(manifest, c_element_op):
     operation_kind = library.GemmKind.BatchGemm
     a_element_desc = library.TensorDesc(
         library.DataType.f16, library.LayoutType.ColumnMajor
@@ -1899,7 +1899,7 @@ def CreateBmmCCRAddOperator(manifest, c_element_op):
     return operations
 
 
-def CreateBmmCRRAddOperator(manifest, c_element_op):
+def CreateBmmCRRBillinearOperator(manifest, c_element_op):
     operation_kind = library.GemmKind.BatchGemm
     a_element_desc = library.TensorDesc(
         library.DataType.f16, library.LayoutType.ColumnMajor
@@ -2482,11 +2482,11 @@ def GenerateTensorOp(manifest):
     # BmmRRR
     CreateBmmRRROperator(manifest)
     # BmmRRRAdd
-    CreateBmmRRRAddOperator(manifest, library.TensorOperation.Add)
+    CreateBmmRRRBillinearOperator(manifest, library.TensorOperation.Add)
     # BmmCRRAdd
-    CreateBmmCRRAddOperator(manifest, library.TensorOperation.Add)
+    CreateBmmCRRBillinearOperator(manifest, library.TensorOperation.Add)
     # BmmCRRAdd
-    CreateBmmCCRAddOperator(manifest, library.TensorOperation.Add)
+    CreateBmmCCRBillinearOperator(manifest, library.TensorOperation.Add)
     # BmmCCR
     CreateBmmCCROperator(manifest)
     # BmmCRR

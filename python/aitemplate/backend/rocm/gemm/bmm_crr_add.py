@@ -23,50 +23,6 @@ from ... import registry
 from . import bmm_common, common
 from .layout import CRR
 
-EXTRA_HEADER_TEMPLATE = jinja2.Template(
-    """
-#include "ck/tensor_operation/gpu/device/device_batched_gemm_multi_d_xdl.hpp"
-"""
-)
-
-
-PROBLEM_ARGS_TEMPLATE = jinja2.Template(
-    """
-{{indent}}                                static_cast<ck::half_t *>(in_ptr),
-{{indent}}                                static_cast<ck::half_t *>(weight_ptr),
-{% if "bias" in gemm_flag %}
-{{indent}}                                std::array<const void*, 1>{static_cast<ck::half_t *>(bias_ptr)},
-{% endif %}
-{{indent}}                                static_cast<ck::half_t *>(out_ptr),
-{{indent}}                                M,
-{{indent}}                                N,
-{{indent}}                                K,
-{{indent}}                                B,
-{{indent}}                                stride_a,
-{{indent}}                                stride_b,
-{% if "bias" in gemm_flag %}
-{{indent}}                                std::array<ck::index_t, 1>{stride_c},
-{% endif %}
-{{indent}}                                stride_c,
-{{indent}}                                M*K,
-{{indent}}                                N*K,
-{% if "bias" in gemm_flag %}
-{{indent}}                                std::array<ck::index_t, 1>{M*N},
-{% endif %}
-{{indent}}                                M*N,
-{{indent}}                                ck::tensor_operation::element_wise::PassThrough{},
-{{indent}}                                ck::tensor_operation::element_wise::PassThrough{},
-{% if gemm_flag == "" %}
-{{indent}}                                ck::tensor_operation::element_wise::PassThrough{}
-{% elif gemm_flag == "bias" %}
-{{indent}}                                ck::tensor_operation::element_wise::Add{}
-{% elif gemm_flag == "bias_relu" %}
-{{indent}}                                ck::tensor_operation::element_wise::AddRelu{}
-{% elif gemm_flag == "bias_sigmoid" %}
-{{indent}}                                ck::tensor_operation::element_wise::AddSigmoid{}
-{% endif %}
-"""
-)
 
 ARGS_PARSER_TEMPLATE = jinja2.Template(
     """
@@ -131,8 +87,6 @@ def bmm_gen_profiler(func_attrs, workdir, dim_info_dict):
         args_parse=ARGS_PARSER_TEMPLATE.render(),
         dim_info_dict=dim_info_dict,
         gemm_flag="bias",
-        problem_args_template=PROBLEM_ARGS_TEMPLATE,
-        extra_header_template=EXTRA_HEADER_TEMPLATE,
     )
 
 
@@ -160,8 +114,6 @@ def bmm_gen_function(func_attrs, exec_cond_template, dim_info_dict):
         exec_cond_template,
         dim_info_dict,
         "bias",
-        PROBLEM_ARGS_TEMPLATE,
-        EXTRA_HEADER_TEMPLATE,
     )
 
 
