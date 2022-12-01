@@ -50,9 +50,9 @@ OUTPUT_ADDR_CALCULATOR = jinja2.Template(
 
 EXTRA_SHAPE_TEMPLATE = jinja2.Template(
     """
-{{indent}}const ck::index_t stride_a = *a_dim1;
-{{indent}}const ck::index_t stride_b = *b_dim1;
-{{indent}}const ck::index_t stride_c = *c_dim1;
+{{indent}}ck::index_t stride_a = *a_dim1;
+{{indent}}ck::index_t stride_b = *b_dim1;
+{{indent}}ck::index_t stride_c = *c_dim1;
 """
 )
 
