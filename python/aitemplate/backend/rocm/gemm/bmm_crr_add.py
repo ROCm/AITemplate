@@ -114,6 +114,13 @@ def bmm_gen_function(func_attrs, exec_cond_template, dim_info_dict):
         exec_cond_template,
         dim_info_dict,
         "bias",
+        input_addr_calculator=bmm_common.INPUT_ADDR_CALCULATOR.render(
+            accessor_a=func_attrs["input_accessors"][0],
+            accessor_b=func_attrs["input_accessors"][1],
+        ),
+        output_addr_calculator=bmm_common.OUTPUT_ADDR_CALCULATOR.render(
+            output_accessor=func_attrs["output_accessors"][0]
+        ),
     )
 
 
