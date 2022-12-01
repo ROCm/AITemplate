@@ -21,7 +21,6 @@ from aitemplate.frontend import Tensor
 from aitemplate.testing import detect_target
 
 
-
 class BMMAddTestCase(unittest.TestCase):
     def test_rrr(self):
         B = 32
