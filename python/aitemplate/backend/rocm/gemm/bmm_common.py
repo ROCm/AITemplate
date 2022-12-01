@@ -162,7 +162,7 @@ TENSOR_DECL_TEMPLATE = jinja2.Template(
   memory_pool->AllocateHalfTensor(b_ptr_sz, mem_pool_sz);  // w: index 1
   memory_pool->AllocateHalfTensor(c_ptr_sz, mem_pool_sz);  // y: index 2
 {% if "bias" in gemm_flag %}
-  memory_pool->AllocateHalfTensor(N, mem_pool_sz);  // b: index 3
+  memory_pool->AllocateHalfTensor(c_ptr_sz, mem_pool_sz);  // b: index 3
 {% endif %}
 """
 )
