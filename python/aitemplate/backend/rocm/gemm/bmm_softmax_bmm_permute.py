@@ -76,7 +76,7 @@ EXTRA_SHAPE_TEMPLATE = jinja2.Template(
 EXTRA_HEADER_TEMPLATE = jinja2.Template(
     """
 #include "ck/tensor_operation/gpu/device/tensor_specialization.hpp"
-#include "ck/tensor_operation/gpu/device/device_batched_gemm_softmax_gemm_permute_xdl_cshuffle.hpp"
+#include "ck/tensor_operation/gpu/device/impl/device_batched_gemm_softmax_gemm_permute_xdl_cshuffle.hpp"
 """
 )
 
@@ -87,19 +87,20 @@ PROBLEM_ARGS_TEMPLATE = jinja2.Template(
 {{indent}}                                static_cast<ck::half_t *>(weight_ptr) + weight_offset,
 {{indent}}                                static_cast<ck::half_t *>(bias_ptr) + bias_offset,
 {{indent}}                                static_cast<ck::half_t *>(out_ptr),
-{{indent}}                                M,
-{{indent}}                                N,
-{{indent}}                                K,
-{{indent}}                                O,
-{{indent}}                                B,
+{{indent}}                                {},
+{{indent}}                                {},
+{{indent}}                                {int(B/G1), int(G1), int(M), int(K)},
+{{indent}}                                {int(M*G1*K), int(K), int(G1*K), 1},
+{{indent}}                                {int(B/G1), int(G1), int(N), int(K)},
+{{indent}}                                {int(N * G1 * K), int(K), int(G1 * K), 1},
+{{indent}}                                {int(B/G1), int(G1), int(O), int(N)},
+{{indent}}                                {int(N * G1 * O), int(O), 1, int(G1 * O)},
 {{indent}}                                {int(B/G1), int(G1), int(M), int(O)},
 {{indent}}                                {int(M * G1 * O), int(O), int(G1 * O), 1},
-{{indent}}                                in_stride,
-{{indent}}                                weight_stride,
-{{indent}}                                bias_stride,
-{{indent}}                                in_batch_stride,
-{{indent}}                                weight_batch_stride,
-{{indent}}                                bias_batch_stride,
+{{indent}}                                {},
+{{indent}}                                {},
+{{indent}}                                {},
+{{indent}}                                {},
 {{indent}}                                ck::tensor_operation::element_wise::PassThrough{},
 {{indent}}                                ck::tensor_operation::element_wise::PassThrough{},
 {{indent}}                                ck::tensor_operation::element_wise::ScaleAndResetNaNToMinusInfinity{alpha},
