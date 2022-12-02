@@ -53,6 +53,7 @@ class XdlOpType(enum.Enum):
     DeviceConv2d_Xdl_CShuffle_Bias_Relu = auto()
     DeviceConv2d_Xdl_CShuffle_Bias_Relu_Add = auto()
     DeviceConv2d_Xdl_CShuffle_Bias_Sigmoid = auto()
+    DeviceConv2d_Xdl_CShuffle_Bias_SiLU = auto()
     DeviceGroupedConv2D_Xdl_CShuffle_Bias_Relu = auto()
     DeviceConvNdBwdDataNwcKxcNwk_Xdl = auto()
     DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1 = auto()
@@ -63,6 +64,7 @@ XdlOpTag = {
     XdlOpType.DeviceConv2d_Xdl_CShuffle_Bias_Relu: "ck::tensor_operation::device::DeviceConv2dFwdXdl_C_Shuffle_Bias_Activation_Input_N_Hi_Wi_C_Weight_K_Y_X_C_Output_N_Ho_Wo_K",
     XdlOpType.DeviceConv2d_Xdl_CShuffle_Bias_Relu_Add: "ck::tensor_operation::device::DeviceConv2dFwdXdl_C_Shuffle_Bias_Activation_Add_Input_N_Hi_Wi_C_Weight_K_Y_X_C_Output_N_Ho_Wo_K",
     XdlOpType.DeviceConv2d_Xdl_CShuffle_Bias_Sigmoid: "ck::tensor_operation::device::DeviceConv2dFwdXdl_C_Shuffle_Bias_Activation_Input_N_Hi_Wi_C_Weight_K_Y_X_C_Output_N_Ho_Wo_K",
+    XdlOpType.DeviceConv2d_Xdl_CShuffle_Bias_SiLU: "ck::tensor_operation::device::DeviceConv2dFwdXdl_C_Shuffle_Bias_Activation_Input_N_Hi_Wi_C_Weight_K_Y_X_C_Output_N_Ho_Wo_K",
     XdlOpType.DeviceGroupedConv2D_Xdl_CShuffle_Bias_Relu: "ck::tensor_operation::device::DeviceGroupedConvFwdMultipleD_Xdl_CShuffle",
     XdlOpType.DeviceConvNdBwdDataNwcKxcNwk_Xdl: "ck::tensor_operation::device::DeviceConvNdBwdDataNwcKxcNwk_Xdl",
     XdlOpType.DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1: "ck::tensor_operation::device::DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1",

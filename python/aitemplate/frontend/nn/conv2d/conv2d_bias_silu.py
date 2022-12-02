@@ -13,28 +13,33 @@
 #  limitations under the License.
 #
 """
-ROCM conv2d init.
+conv2d bias sigmoid module
 """
-from . import (
-    conv2d,
-    conv2d_bias,
-    conv2d_bias_add,
-    conv2d_bias_add_relu,
-    conv2d_bias_relu,
-    conv2d_bias_sigmoid,
-    conv2d_bias_silu,
-    transposed_conv2d,
-    transposed_conv2d_bias_relu,
-)
+from .common_conv2d_bias_act import Conv2dBiasAct
 
-__all__ = [
-    "conv2d",
-    "conv2d_bias",
-    "conv2d_bias_add",
-    "conv2d_bias_add_relu",
-    "conv2d_bias_relu",
-    "conv2d_bias_sigmoid",
-    "conv2d_bias_silu",
-    "transposed_conv2d",
-    "transposed_conv2d_bias_relu",
-]
+
+class Conv2dBiasSiLU(Conv2dBiasAct):
+    r"""Applies 2D convolution with bias + silu."""
+
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        kernel_size,
+        stride,
+        padding=0,
+        dilation=1,
+        groups=1,
+        dtype="float16",
+    ):
+        super().__init__(
+            "conv2d_bias_silu",
+            in_channels,
+            out_channels,
+            kernel_size,
+            stride,
+            padding,
+            dilation,
+            groups,
+            dtype,
+        )
