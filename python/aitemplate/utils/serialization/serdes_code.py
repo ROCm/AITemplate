@@ -116,7 +116,7 @@ def _shape_to_str(shapes: List[Union[IntVar, Tensor]], intimm_to_int=False):
                 f"IntVar({shape._attrs['values']}, name='{shape._attrs['name']}')"
             )
         elif isinstance(shape, Tensor):
-            raise RuntimeError("IntVarTensor not supported yet")
+            shape_str += shape._attrs["name"]
     shape_str += "]"
 
     return shape_str
