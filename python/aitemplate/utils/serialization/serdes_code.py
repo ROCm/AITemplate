@@ -257,6 +257,10 @@ def convert_to_info_str(shapes: List[Union[IntImm, IntVar]], is_constant=False) 
     return f"[{', '.join(info_str_shapes)}]"
 
 
+def _str_val(v):
+    return f'\"{v}\"' if isinstance(v, str) else v
+
+
 def convert_to_op_str(op: Operator, params_set) -> str:
     op_inputs, op_attrs = _retrieve_op_info(op, params_set)
 
@@ -274,7 +278,7 @@ def convert_to_op_str(op: Operator, params_set) -> str:
     return OPS_TEMPLATE.render(
         op_name=", ".join([o._attrs["name"] for o in op._attrs["outputs"]]),
         op_type=op._attrs["op"],
-        op_attrs=", ".join([f"{k}={v}" for k, v in op_attrs.items()]),
+        op_attrs=", ".join([f"{k}={_str_val(v)}" for k, v in op_attrs.items()]),
         op_inputs=", ".join(serialized_op_inputs),
     )
 
