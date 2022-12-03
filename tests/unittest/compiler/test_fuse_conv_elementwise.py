@@ -381,6 +381,7 @@ class FuseConvBiasCase(unittest.TestCase):
             y_transpose = y.permute(0, 3, 1, 2)
             self.assertTrue(torch.allclose(Y_pt, y_transpose, atol=1e-1, rtol=1e-1))
     
+    @unittest.skipIf(detect_target().name() == "cuda", "Not supported by CUDA.")
     def test_conv2d_bias_silu(self):
         B = [1]
         batch_dim = shape_utils.gen_int_var_min_max(B, name="batch_dim")
