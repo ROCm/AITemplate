@@ -2455,8 +2455,10 @@ def GenerateTensorOp(manifest):
     CreateGemmRCRBillinearOperator(manifest, library.TensorOperation.AddTanh)
     # GemmRCRBiasTanh
     CreateGemmRCRBillinearOperator(manifest, library.TensorOperation.AddFastGelu)
-    # GemmRCRBiasSwish
+    # GemmRCRBiasHardswish
     CreateGemmRCRBillinearOperator(manifest, library.TensorOperation.AddHardswish)
+    # GemmRCRBiasSwish
+    CreateGemmRCRBillinearOperator(manifest, library.TensorOperation.AddSwish)
     # GemmRCRBiasSigmoid
     CreateGemmRCRBillinearOperator(manifest, library.TensorOperation.AddSigmoid)
     # GemmRCRBiasAdd
