@@ -21,6 +21,7 @@ from .conv2d_bias import conv2d_bias
 from .conv2d_bias_add import conv2d_bias_add
 from .conv2d_bias_add_hardswish import conv2d_bias_add_hardswish
 from .conv2d_bias_add_relu import conv2d_bias_add_relu
+from .conv2d_bias_add_silu import conv2d_bias_add_silu
 from .conv2d_bias_few_channels import conv2d_bias_few_channels
 from .conv2d_bias_hardswish import conv2d_bias_hardswish
 from .conv2d_bias_hardswish_few_channels import conv2d_bias_hardswish_few_channels

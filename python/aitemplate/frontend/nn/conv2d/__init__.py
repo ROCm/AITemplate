@@ -20,6 +20,7 @@ from .conv2d import Conv2d
 from .conv2d_bias import Conv2dBias
 from .conv2d_bias_add_hardswish import Conv2dBiasAddHardswish
 from .conv2d_bias_add_relu import Conv2dBiasAddRelu
+from .conv2d_bias_add_silu import Conv2dBiasAddSiLU
 from .conv2d_bias_few_channels import Conv2dBiasFewChannels
 from .conv2d_bias_hardswish import Conv2dBiasHardswish
 from .conv2d_bias_hardswish_few_channels import Conv2dBiasHardswishFewChannels

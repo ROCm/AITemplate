@@ -2429,6 +2429,13 @@ def GenerateTensorOp(manifest):
         library.TensorOperation.AddSigmoid,
         library.MemoryDataOperation.MemorySet,
     )
+    # Conv2dBiasAddSiLU
+    CreateConv2dFwdOperator(
+        manifest,
+        library.Conv2dKind.GroupConv2dBiasRelu,
+        library.TensorOperation.AddAddSiLU,
+        library.MemoryDataOperation.MemorySet,
+    )
     # TranposedConv2d
     CreateConv2dBwdOperator(
         manifest,
