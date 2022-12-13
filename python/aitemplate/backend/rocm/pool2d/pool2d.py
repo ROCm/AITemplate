@@ -103,9 +103,7 @@ void {{function_name}}(
 
   {{exec_paths}}
 
-  throw std::runtime_error(
-      "Unsupported workload for this conv2d specialization."
-  );
+  LOG(FATAL) << "Unsupported workload for this pool2d specialization.";
 }
 """
 )
