@@ -19,6 +19,7 @@ Rocm backend init.
 from . import lib_template, target_def, utils
 from .common import *
 from .conv2d import *
+from .embedding import *
 from .gemm import *
 from .pool2d import *
 from .view_ops import *
