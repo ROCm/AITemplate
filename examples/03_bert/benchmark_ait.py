@@ -175,12 +175,21 @@ def benchmark(
     with open(f"bert_ait_benchmark_dev_{dev_flag}.txt", "a") as f:
         f.write(f"batch_size: {batch_size}, seq_length: {seq_length}, latency: {t}\n")
 
+    mod.run_with_tensors(
+        inputs,
+        outputs,
+        graph_mode=graph_mode,
+        get_trace=True,
+        trace_name="trace_bert.json"
+    )
+
 
 def compile_module(
     batch_size: int,
     seq_length: int,
     hidden_size: int,
     activation: str,
+    tmp_ws: str,
     use_fp16_acc: bool,
     encoders_only: bool,
     pt_model: torch.nn.Module,
@@ -194,9 +203,19 @@ def compile_module(
         inputs = create_bert_inputs(batch_size, seq_length)
 
     if encoders_only:
-        model = BertBaseEncodersOnly(batch_size, seq_length, hidden_act=activation)
+        model = BertBaseEncodersOnly(batch_size, seq_length,
+                        hidden_size=1024,
+                        num_attention_heads=16,
+                        intermediate_size=4096,
+                        num_hidden_layers=24,
+                        hidden_act=activation)
     else:
-        model = BertBaseUncased(batch_size, seq_length, hidden_act=activation)
+        model = BertBaseUncased(batch_size, seq_length,
+                        hidden_size=1024,
+                        num_attention_heads=16,
+                        intermediate_size=4096,
+                        num_hidden_layers=24,
+                        hidden_act=activation)
 
     # Mark all parameters with name same to PyTorch name convention
     model.name_parameter_tensor()
@@ -207,7 +226,7 @@ def compile_module(
 
     params = map_pt_params(model, pt_model, batch_size, seq_length)
 
-    mod = compile_model(y, target, "./tmp", model_name)
+    mod = compile_model(y, target, tmp_ws, model_name)
 
     for k, v in params.items():
         mod.set_constant_with_tensor(k, v)
@@ -223,6 +242,11 @@ def compile_module(
     type=str,
     default="fast_gelu",
     help="Activation function applied on BERT, currently only support fast_gelu on Rocm. CUDA supports both gelu and fast_gelu. No effect if framework is pt.",
+)
+@click.option(
+    "--tmp-ws",
+    type=str,
+    default="./tmp"
 )
 @click.option(
     "--graph-mode",
@@ -252,6 +276,7 @@ def compile_and_benchmark(
     batch_size: int,
     seq_length: int,
     activation: str,
+    tmp_ws: str,
     graph_mode: bool,
     use_fp16_acc: bool,
     use_pretrained_pt_model: bool,
@@ -268,14 +293,18 @@ def compile_and_benchmark(
     hidden_size = pt_model.config.hidden_size
 
     if batch_size < 1:
-        batch_sizes = [1, 2, 4, 8, 16, 32, 64, 128, 256]
+        # batch_sizes = [1, 2, 4, 8, 16, 32, 64, 128, 256]
+        batch_sizes = [1, 2, 32]
     else:
         batch_sizes = [batch_size]
 
     if seq_length < 1:
         seq_lengths = (
-            [64, 128, 384, 512, 1024, 4096] if encoders_only else [64, 128, 384, 512]
+            [384] if encoders_only else [384]
         )
+        # seq_lengths = (
+        #     [64, 128, 384, 512, 1024, 4096] if encoders_only else [64, 128, 384, 512]
+        # )
     else:
         seq_lengths = [seq_length]
 
@@ -286,6 +315,7 @@ def compile_and_benchmark(
                 seq_length,
                 hidden_size,
                 activation,
+                tmp_ws,
                 use_fp16_acc,
                 encoders_only,
                 pt_model,

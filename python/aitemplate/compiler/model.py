@@ -22,6 +22,7 @@ import math
 from typing import Callable, Dict, List, NamedTuple, Optional, Tuple, TypeVar, Union
 
 import numpy as np
+import torch
 
 from aitemplate.utils.torch_utils import torch_dtype_to_string
 
@@ -462,6 +463,8 @@ class Model(object):
         stream_ptr: Optional[int] = None,
         sync: bool = True,
         graph_mode: bool = False,
+        get_trace: bool = False,
+        trace_name: str = "trace.json",
     ) -> Dict[str, TorchTensor]:
         """
         Run the model with torch.Tensors. See Run() for information about the
@@ -480,13 +483,24 @@ class Model(object):
             outputs,
             name="outputs",
         )
-        outputs_ait = self.run(
-            _convert_tensor_args(inputs),
-            _convert_tensor_args(outputs),
-            stream_ptr=stream_ptr,
-            sync=sync,
-            graph_mode=graph_mode,
-        )
+        if get_trace:
+            with torch.profiler.profile() as p:
+                outputs_ait = self.run(
+                _convert_tensor_args(inputs),
+                _convert_tensor_args(outputs),
+                stream_ptr=stream_ptr,
+                sync=sync,
+                graph_mode=graph_mode,
+                )
+            p.export_chrome_trace(trace_name)
+        else: 
+            outputs_ait = self.run(
+                _convert_tensor_args(inputs),
+                _convert_tensor_args(outputs),
+                stream_ptr=stream_ptr,
+                sync=sync,
+                graph_mode=graph_mode,
+            )
 
         return self._interpret_tensors_as_shapes(outputs, outputs_ait)
 
