@@ -30,13 +30,13 @@ FUNC_TEMPLATE = jinja2.Template(
     """
 #include "logging.h"
 #include "ck/ck.hpp"
-#include "ck/tensor_operation/gpu/device/impl/device_sparse_embedding3_forward_layernorm.hpp"
+#include "ck/tensor_operation/gpu/device/impl/device_sparse_embeddings_forward_layernorm.hpp"
 
 #define EMBEDDING_DIM {{embedding_dim}}
 
 {{func_signature}}
 {
-  auto device_instance = ck::tensor_operation::device::DeviceSparseEmbedding3ForwardLayernorm<{{elem_input_type}}, {{index_type}}, {{elem_input_type}}, {{elem_input_type}}, float, {{elem_input_type}}, 256, 1, 256, 1, EMBEDDING_DIM, 1, {{row_v_size}}>{};
+  auto device_instance = ck::tensor_operation::device::DeviceSparseEmbeddingsForwardLayernorm<{{elem_input_type}}, {{index_type}}, {{elem_input_type}}, {{elem_input_type}}, float, {{elem_input_type}}, 256, 1, 256, 1, EMBEDDING_DIM, 1, {{row_v_size}}, 3>{};
   auto argument_ptr = device_instance.MakeArgumentPointer(output,
                                                           word_embeddings,
                                                           token_type_embeddings,
