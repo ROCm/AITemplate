@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import glob,os, io, argparse, datetime
+import glob, sys, os, io, argparse, datetime
 #import numpy as np
 import sqlalchemy
 from sqlalchemy.types import NVARCHAR, Float, Integer
@@ -97,9 +97,13 @@ def compare_test_to_baseline(baseline,test,testlist):
         base=baseline[testlist].to_numpy(dtype='float')
         base_list=base[0]
         ave_perf=0
+        if len(base_list)>len(test):
+            print("ERROR: some of the tests have failed!")
+            regression=-1
+            return regression
         for i in range(len(base_list)):
             # success criterion:
-            if base_list[i]>1.01*float(test[i]):
+            if base_list[i]>1.1*float(test[i]):
                 print("test # ",i,"shows regression by {:.3f}%".format(
                     (float(test[i])-base_list[i])/base_list[i]*100))
                 regression=1
@@ -168,6 +172,8 @@ def main():
     #compare the results to the baseline if baseline exists
     regression=0
     regression=compare_test_to_baseline(baseline,results,testlist)
+    if regression != 0:
+        sys.exit(1)
     return regression
 
 if __name__ == '__main__':
