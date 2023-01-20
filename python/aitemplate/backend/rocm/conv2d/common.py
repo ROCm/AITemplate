@@ -40,7 +40,7 @@ PROBLEM_ARGS_TEMPLATE = jinja2.Template(
 
 {% if conv2d_flag == "" %}
 {{indent}}                                {},
-{% elif conv2d_flag in ["bias", "bias_relu", "bias_sigmoid"] %}
+{% elif conv2d_flag in ["bias", "bias_relu", "bias_sigmoid", "bias_silu"] %}
 {{indent}}                                std::array<const void*, 1>{static_cast<ck::half_t *>(bias_ptr)},
 {% elif conv2d_flag in ["bias_add_relu", "bias_add_identity"] %}
 {{indent}}                                std::array<const void*, 2>{static_cast<ck::half_t *>(bias_ptr), static_cast<ck::half_t *>(res_ptr)},
@@ -52,7 +52,7 @@ PROBLEM_ARGS_TEMPLATE = jinja2.Template(
 {{indent}}                                b_g_k_c_xs_strides,
 {% if conv2d_flag == "" %}
 {{indent}}                                {}, {},
-{% elif conv2d_flag in ["bias", "bias_relu", "bias_sigmoid"] %}
+{% elif conv2d_flag in ["bias", "bias_relu", "bias_sigmoid", "bias_silu"] %}
 {{indent}}                                std::array<std::array<ck::index_t, NDimSpatial + 3>, 1>{ {d_g_n_k_wos_lengths} },
 {{indent}}                                std::array<std::array<ck::index_t, NDimSpatial + 3>, 1>{ {d_g_n_k_wos_strides} },
 {% elif conv2d_flag in ["bias_add_relu", "bias_add_identity"] %}
@@ -75,6 +75,8 @@ PROBLEM_ARGS_TEMPLATE = jinja2.Template(
 {{indent}}                                ck::tensor_operation::element_wise::AddRelu{}
 {% elif conv2d_flag == "bias_sigmoid" %}
 {{indent}}                                ck::tensor_operation::element_wise::AddSigmoid{}
+{% elif conv2d_flag == "bias_silu" %}
+{{indent}}                                ck::tensor_operation::element_wise::AddSiLU{}
 {% elif conv2d_flag == "bias_add_identity" %}
 {{indent}}                                ck::tensor_operation::element_wise::AddAdd{}
 {% elif conv2d_flag == "bias_add_relu" %}

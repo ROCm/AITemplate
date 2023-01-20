@@ -228,6 +228,7 @@ class Conv2dKind(enum.Enum):
     Conv2dBiasRelu = auto()
     Conv2dBiasReluAdd = auto()
     Conv2dBiasSigmoid = auto()
+    Conv2dBiasSiLU = auto()
     GroupConv2dBiasRelu = auto()
     TransposedConv2d = auto()
     TransposedConv2dBiasRelu = auto()
@@ -238,6 +239,7 @@ Conv2dKindNames = {
     Conv2dKind.Conv2dBiasRelu: "conv2d_bias_relu",
     Conv2dKind.Conv2dBiasReluAdd: "conv2d_bias_relu_add",
     Conv2dKind.Conv2dBiasSigmoid: "conv2d_bias_sigmoid",
+    Conv2dKind.Conv2dBiasSiLU: "conv2d_bias_silu",
     Conv2dKind.GroupConv2dBiasRelu: "group_conv2d_bias_relu",
     Conv2dKind.TransposedConv2d: "transposed_conv2d",
     Conv2dKind.TransposedConv2dBiasRelu: "transposed_conv2d_bias_relu",
@@ -284,6 +286,7 @@ class TensorOperation(enum.Enum):
     AddHardswish = auto()
     AddSwish = auto()
     AddSigmoid = auto()
+    AddSiLU = auto()
     AddReluAdd = auto()
     AddAddRelu = auto()
     AddSigmoidMul = auto()
@@ -312,6 +315,7 @@ TensorOperationTag = {
     TensorOperation.AddFastGelu: "ck::tensor_operation::element_wise::AddFastGelu",
     TensorOperation.AddTanh: "ck::tensor_operation::element_wise::AddTanh",
     TensorOperation.AddSigmoid: "ck::tensor_operation::element_wise::AddSigmoid",
+    TensorOperation.AddSiLU: "ck::tensor_operation::element_wise::AddSiLU",
     TensorOperation.AddHardswish: "ck::tensor_operation::element_wise::AddHardswish",
     TensorOperation.AddSwish: "ck::tensor_operation::element_wise::AddSwish",
     TensorOperation.AddReluAdd: "ck::tensor_operation::element_wise::AddReluAdd",
@@ -342,6 +346,7 @@ ShortTensorOperationNames = {
     TensorOperation.AddFastGelu: "AFG",
     TensorOperation.AddTanh: "AT",
     TensorOperation.AddSigmoid: "AS",
+    TensorOperation.AddSiLU: "ASLU",
     TensorOperation.AddHardswish: "AH",
     TensorOperation.AddSwish: "ASW",
     TensorOperation.AddReluAdd: "ARA",

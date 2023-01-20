@@ -13,7 +13,7 @@
 #  limitations under the License.
 #
 """
-ROCM codegen functions for conv2d_bias_sigmoid.
+ROCM codegen functions for conv2d_bias_silu.
 """
 import jinja2
 
@@ -24,7 +24,7 @@ from . import common
 
 EXTRA_CODE = jinja2.Template(
     """
-#include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_fwd_multiple_d_xdl_cshuffle.hpp"
+#include "ck/tensor_operation/gpu/device/device_grouped_conv_fwd_multiple_d_xdl_cshuffle.hpp"
 
 #include "ck/utility/data_type.hpp"
 
@@ -32,7 +32,7 @@ namespace ck {
 namespace tensor_operation {
 namespace element_wise {
 namespace {
-struct AddSigmoid
+struct AddSiLU
 {
     template <typename T>
     __host__ __device__ constexpr void operator()(T& y, const T& x0, const T& x1) const;
@@ -42,7 +42,7 @@ struct AddSigmoid
     operator()<float>(float& y, const float& x0, const float& x1) const
     {
         const float a = x0 + x1;
-        y             = 1.0f / (1.0f + exp(-a));
+        y             = 1.0f / (1.0f + exp(-a)) * a;
     };
 
     template <>
@@ -50,7 +50,7 @@ struct AddSigmoid
     operator()<double>(double& y, const double& x0, const double& x1) const
     {
         const double a = x0 + x1;
-        y              = 1.0 / (1.0 + exp(-a));
+        y              = 1.0 / (1.0 + exp(-a)) * a;
     };
 
     template <>
@@ -58,7 +58,7 @@ struct AddSigmoid
     operator()<half_t>(half_t& y, const half_t& x0, const half_t& x1) const
     {
         const half_t a = x0 + x1;
-        y              = type_convert<half_t>(1.0) / (type_convert<half_t>(1.0) + type_convert<half_t>(exp(ck::type_convert<float>(-a))));
+        y              = type_convert<half_t>(1.0) / (type_convert<half_t>(1.0) + type_convert<half_t>(exp(ck::type_convert<float>(-a)))) * a;
     };
 };
 } // namespace
@@ -69,7 +69,7 @@ struct AddSigmoid
 )
 
 
-@registry.reg("rocm.conv2d_bias_sigmoid.config")
+@registry.reg("rocm.conv2d_bias_silu.config")
 def conv2d_config(func_attrs):
     """Extracts (operation name, operation instance) pair from
     all operation candidates.
@@ -89,11 +89,11 @@ def conv2d_config(func_attrs):
     import ck_lib
 
     op_kind = ck_lib.library.Conv2dKind.GroupConv2dBiasRelu
-    extra_kind = ck_lib.library.TensorOperation.AddSigmoid
+    extra_kind = ck_lib.library.TensorOperation.AddSiLU
     func_attrs["op_instance"] = common.extract_config(op_kind, extra_kind)
 
 
-@registry.reg("rocm.conv2d_bias_sigmoid.gen_profiler")
+@registry.reg("rocm.conv2d_bias_silu.gen_profiler")
 def conv2d_gen_profiler(func_attrs, workdir, shape_template):
     """Generates standalone executables for profiler.
 
@@ -111,12 +111,12 @@ def conv2d_gen_profiler(func_attrs, workdir, shape_template):
         func_attrs=func_attrs,
         workdir=workdir,
         shape_template=shape_template,
-        conv2d_flag="bias_sigmoid",
+        conv2d_flag="bias_silu",
         extra_code=EXTRA_CODE.render(),
     )
 
 
-@registry.reg("rocm.conv2d_bias_sigmoid.gen_function")
+@registry.reg("rocm.conv2d_bias_silu.gen_function")
 def conv2d_gen_function(
     func_attrs,
     exec_cond_remplate,
@@ -148,12 +148,12 @@ def conv2d_gen_function(
         exec_cond_remplate,
         shape_eval_template,
         shape_save_template,
-        "bias_sigmoid",
+        "bias_silu",
         extra_code=EXTRA_CODE.render(),
     )
 
 
-@registry.reg("rocm.conv2d_bias_sigmoid.func_decl")
+@registry.reg("rocm.conv2d_bias_silu.func_decl")
 def conv2d_gen_function_decl(func_attrs):
     """Generates function declarations.
 
@@ -171,7 +171,7 @@ def conv2d_gen_function_decl(func_attrs):
     return common.gen_function_decl(func_name=func_name, conv2d_flag="bias_sigmoid")
 
 
-@registry.reg("rocm.conv2d_bias_sigmoid.func_call")
+@registry.reg("rocm.conv2d_bias_silu.func_call")
 def conv2d_gen_function_call(func_attrs, indent="  "):
     """Generates function call.
 
@@ -187,10 +187,10 @@ def conv2d_gen_function_call(func_attrs, indent="  "):
     str
         The rendered template of generated function call.
     """
-    return common.gen_function_call(func_attrs, indent, conv2d_flag="bias_sigmoid")
+    return common.gen_function_call(func_attrs, indent, conv2d_flag="bias_silu")
 
 
-@registry.reg("rocm.conv2d_bias_sigmoid.filter")
+@registry.reg("rocm.conv2d_bias_silu.filter")
 def conv2d_function_filter(cfg, func_attrs, x_shape):
     """Generates function filter.
 
