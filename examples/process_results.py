@@ -97,6 +97,7 @@ def compare_test_to_baseline(baseline,test,testlist):
         base=baseline[testlist].to_numpy(dtype='float')
         base_list=base[0]
         ave_perf=0
+        print("Number of baseline results: ",len(base_list)," Number of tests: ",len(test))
         if len(base_list)>len(test):
             print("ERROR: some of the tests have failed!")
             regression=-1
