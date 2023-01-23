@@ -79,7 +79,7 @@ def parse_logfile(files):
     return res
 
 def get_baseline(table, connection):
-    query = '''SELECT * from '''+table+''' WHERE Datetime = (SELECT MAX(Datetime) FROM '''+table+''' where git_branch='amd-develop' );'''
+    query = '''SELECT * from '''+table+''' WHERE Datetime = (SELECT MIN(Datetime) FROM '''+table+''' where git_branch='amd-develop' AND  Test64>0 );'''
     return pd.read_sql_query(query, connection)
 
 def store_new_test_result(table_name, test_results, testlist, node_id, branch_name, commit, gpu_arch, compute_units, ngpus, rocm_vers, compiler_vers, connection):
@@ -98,6 +98,7 @@ def compare_test_to_baseline(baseline,test,testlist):
         base_list=base[0]
         ave_perf=0
         print("Number of baseline results: ",len(base_list)," Number of tests: ",len(test))
+        print("Baseline test64= ",base_list[63])
         if len(base_list)>len(test):
             print("ERROR: some of the tests have failed!")
             regression=-1
