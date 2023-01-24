@@ -95,13 +95,13 @@ def compare_test_to_baseline(baseline,test,testlist):
     regression=0
     if not baseline.empty:
         test_columns=[]
-        for i in range(1,64):
+        # make sure to use the complete list of tests
+        for i in range(1,65):
             test_columns.append("Test%i"%i)
         base=baseline[test_columns].to_numpy(dtype='float')
         base_list=base[0]
         ave_perf=0
         print("Number of baseline results: ",len(base_list)," Number of tests: ",len(test))
-        print("Baseline: ",base_list[0],base_list[1],base_list[2],base_list[3],base_list[4])
         if len(base_list)>len(test):
             print("ERROR: some of the tests have failed!")
             regression=-1
