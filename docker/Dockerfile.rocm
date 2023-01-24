@@ -98,7 +98,9 @@ RUN bash /Install/install_doc_dep.sh
 
 # Install Pytorch
 RUN pip3 install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/rocm5.1.1
-
+RUN pip3 install timm transformers click diffusers==0.11.1 accelerate
+RUN pip3 install --upgrade pip
+RUN pip3 install sqlalchemy pymysql pandas sshtunnel
 # for detection
 RUN DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get -y install tzdata
 RUN bash /Install/install_detection_deps.sh

@@ -46,10 +46,10 @@ jobs:
         python3 setup.py bdist_wheel
         pip3 install dist/*.whl
         #install necessary python modules
-        pip3 install timm
-        pip3 uninstall -y torch 
-        pip3 install torch --extra-index-url https://download.pytorch.org/whl/rocm5.1.1
-        python3 -m pip install transformers click
+        #pip3 install timm
+        #pip3 uninstall -y torch 
+        #pip3 install torch --extra-index-url https://download.pytorch.org/whl/rocm5.1.1
+        #python3 -m pip install transformers click
         python3 -c "import torch; print(torch.__version__)"
         #run examples
     - name: Run Resnet-50 Tests
@@ -114,7 +114,7 @@ jobs:
       run: |
         echo "Running Stable Diffusion tests"
         cd $GITHUB_WORKSPACE/AITemplate/
-        python3 -m pip install transformers click diffusers==0.11.1 accelerate
+        #python3 -m pip install transformers click diffusers==0.11.1 accelerate
         # populate log headers
         export GIT_BRANCH=${GITHUB_BASE_REF:-${GITHUB_REF#refs/heads/}}
         echo -n "hostname: ">sdiff.log; hostname >> sdiff.log
@@ -136,8 +136,8 @@ jobs:
       run: |
         echo "processing the test results"
         cd $GITHUB_WORKSPACE/AITemplate/examples/
-        pip3 install --upgrade pip
-        pip3 install sqlalchemy pymysql pandas sshtunnel
+        #pip3 install --upgrade pip
+        #pip3 install sqlalchemy pymysql pandas sshtunnel
         export dbuser=${{ secrets.DBUSER }}
         export dbpassword=${{ secrets.DBPASSWORD }}
         python3 process_results.py 
