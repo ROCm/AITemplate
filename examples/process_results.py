@@ -79,7 +79,7 @@ def parse_logfile(files):
     return res
 
 def get_baseline(table, connection):
-    query = '''SELECT * from '''+table+''' WHERE Datetime = (SELECT MIN(Datetime) FROM '''+table+''' where git_branch='amd-develop' AND  Test64>0 );'''
+    query = '''SELECT * from '''+table+''' WHERE Datetime = (SELECT MIN(Datetime) FROM '''+table+''' where git_branch='amd-develop' AND  Test64 IS NOT NULL );'''
     return pd.read_sql_query(query, connection)
 
 def store_new_test_result(table_name, test_results, testlist, node_id, branch_name, commit, gpu_arch, compute_units, ngpus, rocm_vers, compiler_vers, connection):
@@ -94,11 +94,14 @@ def store_new_test_result(table_name, test_results, testlist, node_id, branch_na
 def compare_test_to_baseline(baseline,test,testlist):
     regression=0
     if not baseline.empty:
-        base=baseline[testlist].to_numpy(dtype='float')
+        test_columns=[]
+        for i in range(1,64):
+            test_columns.append("Test%i"%i)
+        base=baseline[test_columns].to_numpy(dtype='float')
         base_list=base[0]
         ave_perf=0
         print("Number of baseline results: ",len(base_list)," Number of tests: ",len(test))
-        print("Baseline test64= ",base_list[63])
+        print("Baseline: ",base_list[0],base_list[1],base_list[2],base_list[3],base_list[4])
         if len(base_list)>len(test):
             print("ERROR: some of the tests have failed!")
             regression=-1
