@@ -37,8 +37,8 @@ jobs:
         cd AITemplate
         DOCKER_BUILDKIT=1 ./docker/build.sh rocm
         # push the latest docker to docker hub
-        docker image tag ait:latest rocm/composable_kernel:ait_rocm5.3
-        docker push rocm/composable_kernel:ait_rocm5.3
+        #docker image tag ait:latest rocm/composable_kernel:ait_rocm5.3
+        #docker push rocm/composable_kernel:ait_rocm5.3
         # run docker
         docker run --network=host --device=/dev/kfd --device=/dev/dri --ipc=host --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -v $HOME:/dockerx/ ait:latest
         export ROCM_PATH=/opt/rocm
