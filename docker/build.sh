@@ -18,7 +18,7 @@ if [ "$TARGET" = "cuda" ]; then
     docker build -f ./docker/Dockerfile.cuda -t ait .
 elif [ "$TARGET" = "rocm" ]; then
     echo "Building ROCM Docker Image with tag ait:latest"
-    docker build -f --no-cache ./docker/Dockerfile.rocm -t ait .
+    docker build -f ./docker/Dockerfile.rocm --no-cache -t ait .
 else
     echo "Unknown target"
 fi
