@@ -381,6 +381,66 @@ class FuseConvBiasCase(unittest.TestCase):
             y_transpose = y.permute(0, 3, 1, 2)
             self.assertTrue(torch.allclose(Y_pt, y_transpose, atol=1e-1, rtol=1e-1))
 
+    @unittest.skipIf(detect_target().name() == "cuda", "Not supported by CUDA.")
+    def test_conv2d_bias_add_silu(self):
+        B = [1]
+        batch_dim = shape_utils.gen_int_var_min_max(B, name="batch_dim")
+        CO, HH, WW, CI = 256, 28, 28, 128
+        filter_HW = 3
+
+        conv2d_bias = self._build_conv2d_bias(
+            batch_dim, CO, HH, WW, CI, filter_HW, False
+        )
+        D = Tensor(
+            shape=[batch_dim, HH, WW, CO],
+            dtype="float16",
+            name="input_3",
+            is_input=True,
+        )
+        conv2d_bias_add = ops.elementwise(FuncEnum.ADD)(conv2d_bias, D)
+        conv2d_bias_add_silu = ops.elementwise(FuncEnum.SILU)(conv2d_bias_add)
+        conv2d_bias_add_silu._attrs["is_output"] = True
+        conv2d_bias_add_silu._attrs["name"] = "output_0"
+
+        target = detect_target()
+        module = compile_model(
+            conv2d_bias_add_silu, target, "./tmp", "test_conv2d_bias_add_silu"
+        )
+
+        check_tensor = None
+        for tensor in module.debug_sorted_graph:
+            if tensor._attrs["name"] == "output_0":
+                check_tensor = tensor
+                break
+        self.assertIsNotNone(check_tensor)
+        self.assertEqual(len(check_tensor.src_ops()), 1)
+        src_op = list(check_tensor.src_ops())[0]
+        self.assertEqual(src_op._attrs["op"], "conv2d_bias_add_silu")
+
+        for b in B:
+            X_pt = torch.randn(b, CI, HH, WW).cuda().half()
+            W_pt = torch.randn(CO, CI, filter_HW, filter_HW).cuda().half()
+            B_pt = torch.randn(1, CO, 1, 1).cuda().half()
+            D_pt = torch.randn(b, CO, HH, WW).cuda().half()
+            Y_pt = torch.nn.functional.conv2d(X_pt, W_pt, padding=1)
+            Y_pt = Y_pt + B_pt + D_pt
+            Y_pt = torch.nn.functional.silu(Y_pt)
+
+            x = X_pt.permute((0, 2, 3, 1)).contiguous()
+            w = W_pt.permute((0, 2, 3, 1)).contiguous()
+            d = D_pt.permute((0, 2, 3, 1)).contiguous()
+            inputs = {
+                "input_0": x,
+                "input_1": w,
+                "input_2": B_pt.squeeze(),
+                "input_3": d,
+            }
+
+            y = torch.empty([b, HH, WW, CO]).cuda().half()
+            module.run_with_tensors(inputs, [y])
+            y_transpose = y.permute(0, 3, 1, 2)
+            self.assertTrue(torch.allclose(Y_pt, y_transpose, atol=1e-1, rtol=1e-1))
+            
     def test_conv2d_bias_add_fusion(self):
         target = detect_target()
         if target.name() == "rocm":

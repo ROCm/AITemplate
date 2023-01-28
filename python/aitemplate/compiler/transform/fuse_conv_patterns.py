@@ -19,6 +19,7 @@ from ..ops.conv import (
     conv2d_bias,
     conv2d_bias_add,
     conv2d_bias_add_relu,
+    conv2d_bias_add_silu,
     conv2d_bias_few_channels,
     conv2d_bias_relu,
     conv2d_bias_relu_few_channels,
@@ -52,6 +53,14 @@ def get_conv2d_bias_elementwise_patterns():
                 elementwise(FuncEnum.RELU),
             ),
             conv2d_bias_add_relu,
+        ),
+        (
+            (
+                conv2d_bias(stride=1, pad=0),
+                elementwise(FuncEnum.ADD),
+                elementwise(FuncEnum.SILU),
+            ),
+            conv2d_bias_add_silu,
         ),
         (
             (
