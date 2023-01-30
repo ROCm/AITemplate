@@ -40,7 +40,7 @@ jobs:
         #docker image tag ait:latest rocm/composable_kernel:ait_rocm5.3
         #docker push rocm/composable_kernel:ait_rocm5.3
         # run docker
-        docker run --tty --network=host --device=/dev/kfd --device=/dev/dri --ipc=host --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -v $HOME:/dockerx/ ait:latest
+        docker run --network=host --device=/dev/kfd --device=/dev/dri --ipc=host --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -v $HOME:/dockerx/ ait:latest
         export ROCM_PATH=/opt/rocm
         export ROC_USE_FGS_KERNARG=0
         # clean up and reinstall ait
@@ -56,6 +56,7 @@ jobs:
       run: |
         echo "Running RESNET50 tests"
         cd $GITHUB_WORKSPACE/AITemplate/examples/01_resnet-50
+        rm -rf /home/AITemplate/.aitemplate
         # populate log headers
         export GIT_BRANCH=${GITHUB_BASE_REF:-${GITHUB_REF#refs/heads/}}
         echo -n "hostname: ">resnet50.log; hostname >> resnet50.log
@@ -76,6 +77,7 @@ jobs:
       run: |
         echo "Running BERT tests"
         cd $GITHUB_WORKSPACE/AITemplate/examples/03_bert
+        rm -rf /home/AITemplate/.aitemplate
         # populate log headers
         export GIT_BRANCH=${GITHUB_BASE_REF:-${GITHUB_REF#refs/heads/}}
         echo -n "hostname: ">bert.log; hostname >> bert.log
@@ -94,6 +96,7 @@ jobs:
       run: |
         echo "Running VIT tests"
         cd $GITHUB_WORKSPACE/AITemplate/examples/04_vit
+        rm -rf /home/AITemplate/.aitemplate
         # populate log headers
         export GIT_BRANCH=${GITHUB_BASE_REF:-${GITHUB_REF#refs/heads/}}
         echo -n "hostname: ">vit.log; hostname >> vit.log
@@ -114,6 +117,7 @@ jobs:
       run: |
         echo "Running Stable Diffusion tests"
         cd $GITHUB_WORKSPACE/AITemplate/
+        rm -rf /home/AITemplate/.aitemplate
         # populate log headers
         export GIT_BRANCH=${GITHUB_BASE_REF:-${GITHUB_REF#refs/heads/}}
         echo -n "hostname: ">sdiff.log; hostname >> sdiff.log
