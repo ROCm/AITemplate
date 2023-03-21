@@ -200,9 +200,6 @@ def process_results(Map conf=[:]){
 
 pipeline {
     agent none
-    triggers {
-        parameterizedCron(CRON_SETTINGS)
-    }
     options {
         parallelsAlwaysFailFast()
     }
