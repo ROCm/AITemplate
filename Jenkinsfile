@@ -207,7 +207,6 @@ pipeline {
         parallelsAlwaysFailFast()
     }
     parameters {
-        booleanParam(
         string(
             name: 'ROCMVERSION', 
             defaultValue: '5.4.3', 
