@@ -15,7 +15,7 @@
 # ROCM Docker Image for AITemplate
 FROM ubuntu:20.04
 
-ARG ROCMVERSION=5.3
+ARG ROCMVERSION=5.4.3
 
 RUN set -xe
 
