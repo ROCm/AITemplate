@@ -97,7 +97,7 @@ RUN bash /Install/install_test_dep.sh
 RUN bash /Install/install_doc_dep.sh
 
 # Install Pytorch
-RUN pip3 install torch --extra-index-url https://download.pytorch.org/whl/rocm5.1.1
+RUN pip3 install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/rocm5.4.2
 
 # Install some useful python packages
 RUN pip3 install timm

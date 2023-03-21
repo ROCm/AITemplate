@@ -51,6 +51,8 @@ def build_ait(Map conf=[:]){
     def build_cmd = """
         export ROCM_PATH=/opt/rocm
         export ROC_USE_FGS_KERNARG=0
+        mkdir /hf_cache
+        export TRANSFORMERS_CACHE=/hf_cache
         python3 -c "import torch; print(torch.__version__)"
         """
 
