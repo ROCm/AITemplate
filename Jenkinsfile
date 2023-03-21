@@ -51,10 +51,6 @@ def build_ait(Map conf=[:]){
     def build_cmd = """
         export ROCM_PATH=/opt/rocm
         export ROC_USE_FGS_KERNARG=0
-        cd python
-        rm -rf dist build
-        python3 setup.py bdist_wheel
-        pip3 install dist/*.whl
         python3 -c "import torch; print(torch.__version__)"
         """
 
