@@ -118,7 +118,7 @@ def Run_Step(Map conf=[:]){
                 {
                     build_ait(conf)
 					dir("examples"){
-                        sh "./run_tests.sh $HF_TOKEN
+                        sh "./run_tests.sh $HF_TOKEN"
                         archiveArtifacts "resnet50.log"
                         archiveArtifacts "bert.log"
                         archiveArtifacts "vit.log"
