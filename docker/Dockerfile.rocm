@@ -97,7 +97,12 @@ RUN bash /Install/install_test_dep.sh
 RUN bash /Install/install_doc_dep.sh
 
 # Install Pytorch
-RUN pip3 install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/rocm5.1.1
+RUN pip3 install torch --extra-index-url https://download.pytorch.org/whl/rocm5.1.1
+
+# Install some useful python packages
+RUN pip3 install timm
+RUN python3 -m pip install transformers click
+RUN python3 -m pip install diffusers==0.11.1 accelerate
 
 # for detection
 RUN DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get -y install tzdata

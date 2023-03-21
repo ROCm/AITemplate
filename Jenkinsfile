@@ -51,16 +51,10 @@ def build_ait(Map conf=[:]){
     def build_cmd = """
         export ROCM_PATH=/opt/rocm
         export ROC_USE_FGS_KERNARG=0
-        pip3 uninstall -y aitemplate
         cd python
         rm -rf dist build
         python3 setup.py bdist_wheel
         pip3 install dist/*.whl
-        pip3 install timm
-        pip3 uninstall -y torch 
-        pip3 install torch --extra-index-url https://download.pytorch.org/whl/rocm5.1.1
-        python3 -m pip install transformers click
-        python3 -m pip install diffusers==0.11.1 accelerate
         python3 -c "import torch; print(torch.__version__)"
         """
 
