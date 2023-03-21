@@ -68,9 +68,6 @@ def build_ait(Map conf=[:]){
         ${build_cmd}
         """)
 
-    cmd += """
-        ${execute_cmd}
-    """
     echo cmd
     sh cmd
 }
