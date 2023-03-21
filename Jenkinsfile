@@ -51,17 +51,16 @@ def build_ait(Map conf=[:]){
     def build_cmd = """
         export ROCM_PATH=/opt/rocm
         export ROC_USE_FGS_KERNARG=0
-        # clean up and reinstall ait
         pip3 uninstall -y aitemplate
         cd python
         rm -rf dist build
         python3 setup.py bdist_wheel
         pip3 install dist/*.whl
-        #install necessary python modules
         pip3 install timm
         pip3 uninstall -y torch 
         pip3 install torch --extra-index-url https://download.pytorch.org/whl/rocm5.1.1
         python3 -m pip install transformers click
+        python3 -m pip install diffusers==0.11.1 accelerate
         python3 -c "import torch; print(torch.__version__)"
         """
 
@@ -71,16 +70,6 @@ def build_ait(Map conf=[:]){
 
     cmd += """
         ${execute_cmd}
-        cd $GITHUB_WORKSPACE/AITemplate/examples/01_resnet-50
-        # populate log headers
-        export GIT_BRANCH=${GITHUB_BASE_REF:-${GITHUB_REF#refs/heads/}}
-        echo -n "hostname: ">resnet50.log; hostname >> resnet50.log
-        echo -n "GPU_arch: " >> resnet50.log; rocminfo | grep "Name:" | grep "gfx" >> resnet50.log
-        rocminfo | grep "Compute Unit:" >> resnet50.log
-        echo "git_branch: $GIT_BRANCH" >> resnet50.log
-        git show --summary | grep commit >> resnet50.log
-        /opt/rocm/bin/amdclang++ --version | grep -e 'InstalledDir' >> resnet50.log
-        HIP_VISIBLE_DEVICES=0,1 python3 benchmark_ait.py 2>&1 | tee -a resnet50.log
     """
     echo cmd
     sh cmd
@@ -101,7 +90,6 @@ def Run_Step(Map conf=[:]){
             dockerOpts = dockerOpts + " --env HSA_XNACK=1 "
         }
         def dockerArgs = "--build-arg PREFIX=${prefixpath} --build-arg ROCMVERSION='${params.ROCMVERSION}' "
-
         def variant = env.STAGE_NAME
         def retimage
 
@@ -129,18 +117,17 @@ def Run_Step(Map conf=[:]){
                 timeout(time: 24, unit: 'HOURS')
                 {
                     build_ait(conf)
-
 					dir("examples"){
-                        //sh "./run_performance_tests.sh 0 CI_${params.COMPILER_VERSION} ${env.BRANCH_NAME} ${NODE_NAME}"
+                        sh "./run_tests.sh $HF_TOKEN
                         archiveArtifacts "resnet50.log"
-                        //archiveArtifacts "bert.log"
-                        //archiveArtifacts "vit.log"
-                        //archiveArtifacts "sdiff.log"
+                        archiveArtifacts "bert.log"
+                        archiveArtifacts "vit.log"
+                        archiveArtifacts "sdiff.log"
                         // stash perf files to master
                         stash name: "resnet50.log"
-                        //stash name: "bert.log"
-                        //stash name: "vit.log"
-                        //stash name: "sdiff.log"
+                        stash name: "bert.log"
+                        stash name: "vit.log"
+                        stash name: "sdiff.log"
                         //we will process the results on the master node
 					}
                 }
@@ -196,9 +183,9 @@ def process_results(Map conf=[:]){
                 dir("examples"){
                     // unstash perf files to master
                     unstash "resnet50.log"
-                    //unstash "bert.log"
-                    //unstash "vit.log"
-                    //unstash "sdiff.log"
+                    unstash "bert.log"
+                    unstash "vit.log"
+                    unstash "sdiff.log"
                     sh "python3 process_results.py"
                 }
             }
@@ -234,6 +221,7 @@ pipeline {
         dbsshuser = "${dbsshuser}"
         dbsshpassword = "${dbsshpassword}"
         status_wrapper_creds = "${status_wrapper_creds}"
+        HF_TOKEN = "${HF_TOKEN}"
         DOCKER_BUILDKIT = "1"
     }
     stages{
@@ -244,12 +232,8 @@ pipeline {
                 stage("Build AIT and Run Tests")
                 {
                     agent{ label rocmnode("gfx908 || gfx90a") }
-                    environment{
-                        setup_args = """ -DCMAKE_INSTALL_PREFIX=../install """ 
-                        execute_args = """  """
-                    }
                     steps{
-                        Run_Step_and_Reboot(setup_args: setup_args, config_targets: "install", no_reboot:true, build_type: 'Release', execute_cmd: execute_args, prefixpath: '/usr/local')
+                        Run_Step_and_Reboot(no_reboot:true, , prefixpath: '/usr/local')
                     }
                 }
             }
