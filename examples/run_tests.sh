@@ -6,6 +6,7 @@
 
 export HF_TOKEN=$1
 export TRANSFORMERS_CACHE=/.cache/huggingface/hub
+export NUM_BUILDERS=$(($(nproc)/2))
 
 function print_log_header(){
 	rm -f $1;
