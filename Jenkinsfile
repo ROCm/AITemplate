@@ -51,7 +51,6 @@ def build_ait(Map conf=[:]){
     def build_cmd = """
         export ROCM_PATH=/opt/rocm
         export ROC_USE_FGS_KERNARG=0
-        export TRANSFORMERS_CACHE=/home/jenkins/hf_cache
         python3 -c "import torch; print(torch.__version__)"
         """
 
@@ -236,3 +235,4 @@ pipeline {
         }
     }
 }
+

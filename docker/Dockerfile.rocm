@@ -104,12 +104,6 @@ RUN pip3 install timm
 RUN python3 -m pip install transformers click
 RUN python3 -m pip install diffusers==0.11.1 accelerate
 
-# Create a folder for Hugging Face cache
-RUN cd /home
-RUN mkdir jenkins
-RUN cd jenkins
-RUN mkdir hf_cache
-
 # for detection
 RUN DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get -y install tzdata
 RUN bash /Install/install_detection_deps.sh
@@ -126,3 +120,14 @@ ADD ./static /AITemplate/static
 ADD ./licenses /AITemplate/licenses
 ADD ./docker/install/install_ait.sh /AITemplate/
 RUN bash /AITemplate/install_ait.sh
+
+# Create a folder for Hugging Face cache
+RUN mkdir /.cache
+RUN chmod a+rw /.cache
+WORKDIR "/.cache"
+RUN mkdir huggingface
+RUN chmod a+rw huggingface
+WORKDIR "/.cache/huggingface"
+RUN mkdir hub
+RUN chmod a+rw hub
+WORKDIR /
