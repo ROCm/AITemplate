@@ -107,15 +107,15 @@ def Run_Step(Map conf=[:]){
                     build_ait(conf)
 					dir("examples"){
                         sh "./run_tests.sh $HF_TOKEN"
-                        archiveArtifacts "resnet50.log"
-                        archiveArtifacts "bert.log"
-                        archiveArtifacts "vit.log"
-                        archiveArtifacts "sdiff.log"
+                        archiveArtifacts "01_resnet-50/resnet50.log"
+                        archiveArtifacts "03_bert/bert.log"
+                        archiveArtifacts "04_vit/vit.log"
+                        archiveArtifacts "05_stable_diffusion/sdiff.log"
                         // stash perf files to master
-                        stash name: "resnet50.log"
-                        stash name: "bert.log"
-                        stash name: "vit.log"
-                        stash name: "sdiff.log"
+                        stash name: "01_resnet-50/resnet50.log"
+                        stash name: "03_bert/bert.log"
+                        stash name: "04_vit/vit.log"
+                        stash name: "05_stable_diffusion/sdiff.log"
                         //we will process the results on the master node
 					}
                 }
@@ -170,10 +170,10 @@ def process_results(Map conf=[:]){
             try{
                 dir("examples"){
                     // unstash perf files to master
-                    unstash "resnet50.log"
-                    unstash "bert.log"
-                    unstash "vit.log"
-                    unstash "sdiff.log"
+                    unstash "01_resnet-50/resnet50.log"
+                    unstash "03_bert/bert.log"
+                    unstash "04_vit/vit.log"
+                    unstash "05_stable_diffusion/sdiff.log"
                     sh "python3 process_results.py"
                 }
             }

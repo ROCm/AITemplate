@@ -35,11 +35,11 @@ cd ../04_vit
 print_log_header vit.log
 HIP_VISIBLE_DEVICES=0,1 python3 benchmark_ait.py 2>&1 | tee -a vit.log
 # test 2 gcd
-for BATCH_SIZE in 1 2 4 8 16 32 64 128 256
-do
-    HIP_VISIBLE_DEVICES=0 python3 benchmark_ait.py --batch-size $BATCH_SIZE 2>&1 | tee -a vit.log &
-    HIP_VISIBLE_DEVICES=1 python3 benchmark_ait.py --batch-size $BATCH_SIZE 2>&1 | tee -a vit.log
-done
+#for BATCH_SIZE in 1 2 4 8 16 32 64 128 256
+#do
+#    HIP_VISIBLE_DEVICES=0 python3 benchmark_ait.py --batch-size $BATCH_SIZE 2>&1 | tee -a vit.log &
+#    HIP_VISIBLE_DEVICES=1 python3 benchmark_ait.py --batch-size $BATCH_SIZE 2>&1 | tee -a vit.log
+#done
 
 echo "Running Stable Diffusion tests"
 cd ../05_stable_diffusion
