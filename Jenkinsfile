@@ -109,19 +109,19 @@ def Run_Step(Map conf=[:]){
                     }
                     dir("examples/01_resnet-50"){
                         archiveArtifacts "resnet50.log"
-                        stash name: "resnet50.log"
+                        stash includes: "resnet50.log", name: "resnet50.log"
                     }
                     dir("examples/03_bert"){
                         archiveArtifacts "bert.log"
-                        stash name: "bert.log"
+                        stash includes: "bert.log", name: "bert.log"
                     }
                     dir("examples/04_vit"){
                         archiveArtifacts "vit.log"
-                        stash name: "vit.log"
+                        stash includes: "vit.log", name: "vit.log"
                     }
                     dir("examples/05_stable_diffusion/"){
                         archiveArtifacts "sdiff.log"
-                        stash name: "sdiff.log"
+                        stash includes: "sdiff.log", name: "sdiff.log"
 					}
                 }
             }

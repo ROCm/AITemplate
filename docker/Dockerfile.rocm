@@ -130,6 +130,8 @@ ADD ./docker/install/install_ait.sh /AITemplate/
 RUN bash /AITemplate/install_ait.sh
 
 # Create a folder for Hugging Face cache
+RUN mkdir /.aitemplate
+RUN chmod a+rw /.aitemplate
 RUN mkdir /.cache
 RUN chmod a+rw /.cache
 WORKDIR "/.cache"
