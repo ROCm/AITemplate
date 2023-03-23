@@ -136,10 +136,10 @@ def main():
     sql_hostname = '127.0.0.1'
     sql_username = os.environ["dbuser"]
     sql_password = os.environ["dbpassword"]
-    sql_main_database = 'sys'
-    sql_port = 3306
     hostname = os.uname()[1]
     if hostname == 'jwr-amd-132':
+        sql_main_database = 'sys'
+        sql_port = 3306
         sqlEngine = sqlalchemy.create_engine('mysql+pymysql://{0}:{1}@{2}/{3}'.
             format(sql_username, sql_password, sql_hostname, sql_main_database))
         conn = sqlEngine.connect()
@@ -148,6 +148,8 @@ def main():
         ssh_user = os.environ["dbsshuser"]
         ssh_port = int(os.environ["dbsshport"])
         ssh_pass = os.environ["dbsshpassword"]
+        sql_main_database = 'miopen_perf'
+        sql_port = 3306
         with SSHTunnelForwarder(
             (ssh_host, ssh_port),
             ssh_username=ssh_user,
