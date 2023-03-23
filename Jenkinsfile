@@ -105,7 +105,7 @@ def Run_Step(Map conf=[:]){
                 {
                     build_ait(conf)
 					dir("examples"){
-                        sh "./run_tests.sh $HF_TOKEN"
+                        sh "./run_tests.sh $HF_TOKEN ${env.BRANCH_NAME} ${NODE_NAME} ${params.ROCMVERSION}"
                     }
                     dir("examples/01_resnet-50"){
                         archiveArtifacts "resnet50.log"
