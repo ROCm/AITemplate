@@ -117,7 +117,7 @@ def Run_Step(Map conf=[:]){
                     }
                     dir("examples/04_vit"){
                         archiveArtifacts "vit.log"
-                        stash name: "04_vit/vit.log"
+                        stash name: "vit.log"
                     }
                     dir("examples/05_stable_diffusion/"){
                         archiveArtifacts "sdiff.log"
