@@ -22,7 +22,7 @@ function print_log_header(){
 echo "Running RESNET50 tests"
 cd 01_resnet-50
 print_log_header resnet50.log
-#HIP_VISIBLE_DEVICES=0 python3 benchmark_ait.py 2>&1 | tee -a resnet50.log
+HIP_VISIBLE_DEVICES=0 python3 benchmark_ait.py 2>&1 | tee -a resnet50.log
 
 echo "Running BERT tests"
 cd ../03_bert
@@ -46,5 +46,5 @@ print_log_header vit.log
 echo "Running Stable Diffusion tests"
 cd ../05_stable_diffusion
 print_log_header sdiff.log
-HIP_VISIBLE_DEVICES=0 python3 compile.py --token $HF_TOKEN 2>&1 | tee -a sdiff.log
-HIP_VISIBLE_DEVICES=0 python3 demo.py --token $HF_TOKEN --benchmark 1 2>&1 | tee -a sdiff.log
+#HIP_VISIBLE_DEVICES=0 python3 compile.py --token $HF_TOKEN 2>&1 | tee -a sdiff.log
+#HIP_VISIBLE_DEVICES=0 python3 demo.py --token $HF_TOKEN --benchmark 1 2>&1 | tee -a sdiff.log
