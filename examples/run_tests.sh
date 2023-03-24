@@ -12,7 +12,7 @@ export TRANSFORMERS_CACHE=/.cache/huggingface/hub
 
 function print_log_header(){
 	rm -f $1;
-    echo -n "hostname: " $2 &> $1; 
+    echo "hostname: " $2 &> $1;
     echo -n "GPU_arch: " >> $1; rocminfo | grep "Name:" | grep "gfx" >> $1
     rocminfo | grep "Compute Unit:" >> $1
     echo "git_branch: " $3 >> $1
