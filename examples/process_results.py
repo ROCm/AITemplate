@@ -135,8 +135,10 @@ def main():
     print("Number of tests:",len(results))
     sql_hostname = '127.0.0.1'
     sql_port = 3306
-    sql_username = os.environ["dbuser"]
-    sql_password = os.environ["dbpassword"]
+    sql_username = "jenkins_miopen"
+    #os.environ["dbuser"]
+    sql_password = "jenkinsmiopen1234"
+    #os.environ["dbpassword"]
     hostname = os.uname()[1]
 
     if hostname == 'jwr-amd-132':
@@ -146,10 +148,14 @@ def main():
         conn = sqlEngine.connect()
     else:
         sql_main_database = "miopen_perf"
-        ssh_host = os.environ["dbsship"]
-        ssh_user = os.environ["dbsshuser"]
-        ssh_port = int(os.environ["dbsshport"])
-        ssh_pass = os.environ["dbsshpassword"]
+        ssh_host = "10.216.64.100"
+        #os.environ["dbsship"]
+        ssh_user = "miopenpdb"
+        #os.environ["dbsshuser"]
+        ssh_port = 20057
+        #int(os.environ["dbsshport"])
+        ssh_pass = "miopen!234"
+        #os.environ["dbsshpassword"]
         with SSHTunnelForwarder(
             (ssh_host, ssh_port),
             ssh_username=ssh_user,
