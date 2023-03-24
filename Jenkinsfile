@@ -108,20 +108,20 @@ def Run_Step(Map conf=[:]){
                         sh "./run_tests.sh $HF_TOKEN ${env.BRANCH_NAME} ${NODE_NAME} ${params.ROCMVERSION}"
                     }
                     dir("examples/01_resnet-50"){
-                        archiveArtifacts "resnet50.log"
-                        stash includes: "resnet50.log", name: "resnet50.log"
+                        archiveArtifacts "01_resnet50.log"
+                        stash includes: "01_resnet50.log", name: "01_resnet50.log"
                     }
                     dir("examples/03_bert"){
-                        archiveArtifacts "bert.log"
-                        stash includes: "bert.log", name: "bert.log"
+                        archiveArtifacts "03_bert.log"
+                        stash includes: "03_bert.log", name: "03_bert.log"
                     }
                     dir("examples/04_vit"){
-                        archiveArtifacts "vit.log"
-                        stash includes: "vit.log", name: "vit.log"
+                        archiveArtifacts "04_vit.log"
+                        stash includes: "04_vit.log", name: "04_vit.log"
                     }
                     dir("examples/05_stable_diffusion/"){
-                        archiveArtifacts "sdiff.log"
-                        stash includes: "sdiff.log", name: "sdiff.log"
+                        archiveArtifacts "05_sdiff.log"
+                        stash includes: "05_sdiff.log", name: "05_sdiff.log"
 					}
                 }
             }
@@ -175,10 +175,10 @@ def process_results(Map conf=[:]){
             try{
                 dir("examples"){
                     // unstash perf files to master
-                    unstash "resnet50.log"
-                    unstash "bert.log"
-                    unstash "vit.log"
-                    unstash "sdiff.log"
+                    unstash "01_resnet50.log"
+                    unstash "03_bert.log"
+                    unstash "04_vit.log"
+                    unstash "05_sdiff.log"
                     sh "python3 process_results.py"
                 }
             }
