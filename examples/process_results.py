@@ -120,6 +120,7 @@ def main():
     testlist=[]
     #parse the test parameters from the logfile
     for filename in files:
+        print("processing file: ",filename)
         branch_name, commit, node_id, gpu_arch, compute_units, ngpus, rocm_vers, compiler_vers = get_log_params(filename)
 
     print("Branch name:",branch_name)
