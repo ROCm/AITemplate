@@ -174,7 +174,8 @@ def process_results(Map conf=[:]){
         timeout(time: 1, unit: 'HOURS'){
             try{
                 dir("examples"){
-                    // unstash perf files to master
+                    // clean up any old logs, then unstash perf files to master
+                    sh "rm -rf *.log"
                     unstash "01_resnet50.log"
                     unstash "03_bert.log"
                     unstash "04_vit.log"
