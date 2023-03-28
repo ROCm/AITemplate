@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-import glob,os, io, argparse, datetime
-#import numpy as np
+import glob, os, io, argparse, datetime
 import sqlalchemy
 from sqlalchemy.types import NVARCHAR, Float, Integer
+from sqlalchemy import text
 import pymysql
 import pandas as pd
 from sshtunnel import SSHTunnelForwarder
@@ -79,8 +79,8 @@ def parse_logfile(files):
     return res
 
 def get_baseline(table, connection):
-    query = '''SELECT * from '''+table+''' WHERE Datetime = (SELECT MAX(Datetime) FROM '''+table+''' where git_branch='amd-develop' );'''
-    return pd.read_sql_query(query, connection)
+    query = text('''SELECT * from '''+table+''' WHERE Datetime = (SELECT MIN(Datetime) FROM '''+table+''' where Test64 IS NOT NULL );''')
+    return pd.read_sql(query, connection)
 
 def store_new_test_result(table_name, test_results, testlist, node_id, branch_name, commit, gpu_arch, compute_units, ngpus, rocm_vers, compiler_vers, connection):
     params=[str(node_id),str(branch_name),str(commit),str(gpu_arch),compute_units,ngpus,str(rocm_vers),str(compiler_vers),str(datetime.datetime.now())]
@@ -93,7 +93,7 @@ def store_new_test_result(table_name, test_results, testlist, node_id, branch_na
 
 def compare_test_to_baseline(baseline,test,testlist):
     regression=0
-    if not baseline.empty:
+    if not len(baseline)==0: 
         base=baseline[testlist].to_numpy(dtype='float')
         base_list=base[0]
         ave_perf=0
@@ -120,6 +120,7 @@ def main():
     testlist=[]
     #parse the test parameters from the logfile
     for filename in files:
+        print("processing file: ",filename)
         branch_name, commit, node_id, gpu_arch, compute_units, ngpus, rocm_vers, compiler_vers = get_log_params(filename)
 
     print("Branch name:",branch_name)
@@ -132,38 +133,45 @@ def main():
     #parse results, get the Tflops value for "Best Perf" kernels
     results=parse_logfile(files)
 
+    for i in range(1,len(results)+1):
+        testlist.append("Test%i"%i)
+    table_name="ait_performance"
+
     print("Number of tests:",len(results))
     sql_hostname = '127.0.0.1'
+    sql_port = 3306
     sql_username = os.environ["dbuser"]
     sql_password = os.environ["dbpassword"]
-    sql_main_database = 'sys'
-    sql_port = 3306
-    hostname = os.uname()[1]
-    if hostname == 'jwr-amd-132':
+    host = os.uname()[1]
+
+    if host == 'jwr-amd-132':
+        print("connecting to local database")
+        sql_main_database = 'sys'
         sqlEngine = sqlalchemy.create_engine('mysql+pymysql://{0}:{1}@{2}/{3}'.
             format(sql_username, sql_password, sql_hostname, sql_main_database))
         conn = sqlEngine.connect()
+        baseline = get_baseline(table_name,conn)
+        store_new_test_result(table_name, results, testlist, node_id, branch_name, commit, gpu_arch, compute_units, ngpus, rocm_vers, compiler_vers, conn)
+        conn.close()
     else:
+        print("connecting to remote database")
+        sql_main_database = "miopen_perf"
         ssh_host = os.environ["dbsship"]
         ssh_user = os.environ["dbsshuser"]
         ssh_port = int(os.environ["dbsshport"])
         ssh_pass = os.environ["dbsshpassword"]
         with SSHTunnelForwarder(
-            (ssh_host, ssh_port),
-            ssh_username=ssh_user,
-            ssh_password=ssh_pass,
-            remote_bind_address=(sql_hostname, sql_port)) as tunnel:
-                sqlEngine = sqlalchemy.create_engine('mysql+pymysql://{0}:{1}@{2}:{3}/{4}'.
-                    format(sql_username, sql_password, sql_hostname, tunnel.local_bind_port, sql_main_database))
-        conn = sqlEngine.connect()
-    #save gemm performance tests:
-    for i in range(1,len(results)+1):
-        testlist.append("Test%i"%i)
-    table_name="ait_performance"
-        
-    baseline = get_baseline(table_name,conn)
-    store_new_test_result(table_name, results, testlist, node_id, branch_name, commit, gpu_arch, compute_units, ngpus, rocm_vers, compiler_vers, conn)
-    conn.close()
+                (ssh_host, ssh_port),
+                ssh_username=ssh_user,
+                ssh_password=ssh_pass,
+                remote_bind_address=(sql_hostname, sql_port)) as tunnel:
+
+            sqlEngine = sqlalchemy.create_engine('mysql+pymysql://{0}:{1}@{2}:{3}/{4}'.
+                format(sql_username, sql_password, sql_hostname, tunnel.local_bind_port, sql_main_database))
+            conn = sqlEngine.connect()
+            baseline = get_baseline(table_name,conn)
+            store_new_test_result(table_name, results, testlist, node_id, branch_name, commit, gpu_arch, compute_units, ngpus, rocm_vers, compiler_vers, conn)
+            conn.close()
 
     #compare the results to the baseline if baseline exists
     regression=0
