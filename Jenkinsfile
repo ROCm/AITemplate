@@ -105,7 +105,12 @@ def Run_Step(Map conf=[:]){
                 {
                     build_ait(conf)
 					dir("examples"){
-                        sh "./run_tests.sh $HF_TOKEN ${env.BRANCH_NAME} ${NODE_NAME} ${params.ROCMVERSION}"
+                        if (params.RUN_FULL_QA){
+                            sh "./run_qa.sh $HF_TOKEN ${env.BRANCH_NAME} ${NODE_NAME} ${params.ROCMVERSION}"
+                        }
+                        else{
+                            sh "./run_tests.sh $HF_TOKEN ${env.BRANCH_NAME} ${NODE_NAME} ${params.ROCMVERSION}"
+                        }
                     }
                     dir("examples/01_resnet-50"){
                         archiveArtifacts "01_resnet50.log"
@@ -192,8 +197,14 @@ def process_results(Map conf=[:]){
     }
 }
 
+//launch amd-develop branch daily at 17:00 UT in FULL_QA mode 
+CRON_SETTINGS = BRANCH_NAME == "amd-develop" ? '''0 17 * * * % RUN_FULL_QA=true''' : ""
+
 pipeline {
     agent none
+    triggers {
+        parameterizedCron(CRON_SETTINGS)
+    }
     options {
         parallelsAlwaysFailFast()
     }
@@ -202,6 +213,10 @@ pipeline {
             name: 'ROCMVERSION', 
             defaultValue: '5.4.3', 
             description: 'Specify which ROCM version to use: 5.4.3 (default).')
+        booleanParam(
+            name: "RUN_FULL_QA",
+            defaultValue: false,
+            description: "Select whether to run small set of performance tests (default) or full QA")
     }
     environment{
         dbuser = "${dbuser}"
@@ -230,6 +245,10 @@ pipeline {
         }
         stage("Process Performance Test Results")
         {
+            when {
+                beforeAgent true
+                expression { params.RUN_FULL_QA.toBoolean() }
+            }
             parallel
             {
                 stage("Process results"){
