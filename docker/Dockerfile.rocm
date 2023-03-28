@@ -44,9 +44,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-
     libpthread-stubs0-dev \
     llvm-amdgpu \
     pkg-config \
-    python \
     python3 \
-    python-dev \
     python3-dev \
     python3-pip \
     software-properties-common \
@@ -100,17 +98,17 @@ RUN bash /Install/install_doc_dep.sh
 RUN pip3 install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/rocm5.4.2
 
 # Install some useful python packages
-RUN pip3 install timm
-RUN python3 -m pip install transformers click
-RUN python3 -m pip install diffusers==0.11.1 accelerate
+RUN pip3 install --upgrade pip
+
+RUN pip3 install transformers click sympy recordtype parameterized einops jinja2
+RUN pip3 install diffusers==0.11.1 accelerate
 
 # Install packages for processing the performance results
-RUN pip3 install --upgrade pip
 RUN pip3 install sqlalchemy==1.4.46
-RUN pip3 install pymysql
-RUN pip3 install pandas
-RUN pip3 install setuptools-rust
-RUN pip3 install sshtunnel
+RUN pip3 install pymysql pandas setuptools-rust sshtunnel
+
+# Install lint packages
+RUN pip3 install ufmt==2.0.1 click==8.1.3 black==22.12.0 flake8==5.0.4
 
 # for detection
 RUN DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get -y install tzdata
@@ -130,14 +128,10 @@ ADD ./docker/install/install_ait.sh /AITemplate/
 RUN bash /AITemplate/install_ait.sh
 
 # Create a folder for Hugging Face cache
-RUN mkdir /.aitemplate
-RUN chmod a+rw /.aitemplate
-RUN mkdir /.cache
-RUN chmod a+rw /.cache
+RUN mkdir /.aitemplate && chmod a+rw /.aitemplate
+RUN mkdir /.cache && chmod a+rw /.cache
 WORKDIR "/.cache"
-RUN mkdir huggingface
-RUN chmod a+rw huggingface
+RUN mkdir huggingface && chmod a+rw huggingface
 WORKDIR "/.cache/huggingface"
-RUN mkdir hub
-RUN chmod a+rw hub
+RUN mkdir hub && chmod a+rw hub
 WORKDIR /
