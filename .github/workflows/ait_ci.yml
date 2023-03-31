@@ -3,10 +3,11 @@ name: AITemplate_ci
 on:
   push:
      branches:
-      - amd-develop
-      - main
+       - amd-develop
+       - main
   pull_request:
-     types: [labeled]
+     types: 
+       - labeled
 
 jobs:
   build:
