@@ -2,6 +2,8 @@ name: AITemplate_ci
 
 on:
   pull_request:
+    types:
+      - labeled
 
 jobs:
   build:
