@@ -6,7 +6,7 @@ on:
 
 jobs:
   build:
-    if: ${{ github.event.label.name == 'module: rocm' }}
+    if: contains(github.event.pull_request.labels.*.name, 'module: rocm')
     runs-on: rocm
 
     steps:
