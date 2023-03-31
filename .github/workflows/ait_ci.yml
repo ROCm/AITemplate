@@ -2,11 +2,11 @@ name: AITemplate_ci
 
 on:
   pull_request:
-     label:
-       - 'module: rocm'
+     types: [labeled]
 
 jobs:
   build:
+    if: ${{ github.event.label.name == 'module: rocm' }}
     runs-on: rocm
 
     steps:
