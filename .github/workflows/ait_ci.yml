@@ -4,6 +4,8 @@ on:
   pull_request:
      label:
        - rocm_ci
+
+
 jobs:
   build:
     runs-on: rocm
