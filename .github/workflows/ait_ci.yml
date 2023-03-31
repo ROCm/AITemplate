@@ -3,8 +3,7 @@ name: AITemplate_ci
 on:
   pull_request:
      label:
-       - rocm_ci
-
+       - 'module: rocm'
 
 jobs:
   build:
