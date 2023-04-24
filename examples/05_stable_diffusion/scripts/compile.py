@@ -32,10 +32,10 @@ from src.compile_lib.compile_vae import compile_vae
 @click.option("--mode", default="Info", help="the mode of running model")
 @click.option(
     "--local-dir",
-    default="./tmp/diffusers-pipeline/stabilityai/stable-diffusion-v2",
+    default="./tmp/diffusers-pipeline/runwayml/stable-diffusion-v1-5",
     help="the local diffusers pipeline directory",
 )
-@click.option("--is-remove-resnet-pre-silu", default=True, help="whether remove resnet-pre-silu or not")
+@click.option("--is-remove-resnet-pre-silu", default=False, help="whether remove resnet-pre-silu or not")
 @click.option("--width", default=512, help="Width of generated image")
 @click.option("--height", default=512, help="Height of generated image")
 @click.option("--batch-size", default=1, help="batch size")
@@ -71,6 +71,7 @@ def compile_diffusers(
     compile_clip(
         pipe.text_encoder,
         batch_size=batch_size,
+        seqlen=77,
         use_fp16_acc=use_fp16_acc,
         convert_conv_to_gemm=convert_conv_to_gemm,
         depth=pipe.text_encoder.config.num_hidden_layers,
