@@ -16,9 +16,9 @@
 Codegen functions for perm102_bmm_rcr, which computes
 C[m, b, n](row) = bmm(A[m, b, k](row), B[b, n, k](col))
 """
-from ... import registry
-from ...backend_spec import CUDASpec
-from . import bmm_common, common
+from aitemplate.backend import registry
+from aitemplate.backend.backend_spec import CUDASpec
+from aitemplate.backend.cuda.gemm_universal import bmm_common, common
 
 # pylint: disable=C0103,C0415,W0613,C0301,R1705,R1703
 
@@ -103,20 +103,13 @@ def gemm_rcr_config(func_attrs, dtype="float16"):
     def fproc(op):
         import cutlass_lib
 
-        from ...backend_spec import CUDASpec
-
-        backend_spec = CUDASpec()
-        elem_type = backend_spec.dtype_to_lib_type(
-            func_attrs["inputs"][0]._attrs["dtype"]
-        )
-
         return common.default_fproc(
             op=op,
             a_layout=cutlass_lib.library.LayoutType.RowMajor,
             b_layout=cutlass_lib.library.LayoutType.ColumnMajor,
             c_layout=cutlass_lib.library.LayoutType.RowMajor,
-            elem_type=elem_type,
-            epiligue_name=func_attrs["epilogue"],
+            dtype=func_attrs["inputs"][0].dtype(),
+            epilogue_name=func_attrs["epilogue"],
         )
 
     func_attrs["op_instance"] = common.extract_config(fproc)

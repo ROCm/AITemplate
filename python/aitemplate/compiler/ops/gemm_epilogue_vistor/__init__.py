@@ -12,17 +12,29 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 #
-from .bmm_rcr_softmax import bmm_rcr_softmax
-from .dual_gemm_rcr_fast_gelu import dual_gemm_rcr_fast_gelu
-from .dual_gemm_rcr_silu import dual_gemm_rcr_silu
-from .gemm_rcr_bias_softmax import gemm_rcr_bias_softmax
-from .gemm_rcr_softmax import gemm_rcr_softmax
+from aitemplate.compiler.ops.gemm_epilogue_vistor.bmm_rcr_softmax import bmm_rcr_softmax
+from aitemplate.compiler.ops.gemm_epilogue_vistor.dual_bmm_rrr_div import (
+    dual_bmm_rrr_div,
+)
+from aitemplate.compiler.ops.gemm_epilogue_vistor.dual_gemm_rcr_fast_gelu import (
+    dual_gemm_rcr_fast_gelu,
+)
+from aitemplate.compiler.ops.gemm_epilogue_vistor.dual_gemm_rcr_silu import (
+    dual_gemm_rcr_silu,
+)
+from aitemplate.compiler.ops.gemm_epilogue_vistor.gemm_rcr_bias_softmax import (
+    gemm_rcr_bias_softmax,
+)
+from aitemplate.compiler.ops.gemm_epilogue_vistor.gemm_rcr_softmax import (
+    gemm_rcr_softmax,
+)
 
 
 __all__ = [
     "bmm_rcr_softmax",
+    "dual_bmm_rrr_div",
+    "dual_gemm_rcr_fast_gelu",
+    "dual_gemm_rcr_silu",
     "gemm_rcr_bias_softmax",
     "gemm_rcr_softmax",
-    "dual_gemm_rcr_silu",
-    "dual_gemm_rcr_fast_gelu",
 ]

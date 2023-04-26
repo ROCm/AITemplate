@@ -126,14 +126,14 @@ def benchmark(model_name, batch_size, mod=None, graph_mode=True):
             params_ait[f"{prefix}_{ait_key}"] = torch.from_numpy(cu_len).cuda()
 
     # set weights
-    for name, weight in params_ait.items():
-        mod.set_constant_with_tensor(name, weight)
+    mod.set_many_constants_with_tensors(params_ait)
+    mod.fold_constants(sync=True)
 
     # prepare input/output tensor
     inputs = [torch.randn([batch_size, img_size, img_size, 3]).cuda().half()]
     ys = []
-    num_ouputs = len(mod.get_output_name_to_index_map())
-    for i in range(num_ouputs):
+    num_outputs = len(mod.get_output_name_to_index_map())
+    for i in range(num_outputs):
         shape = mod.get_output_maximum_shape(i)
         ys.append(torch.empty(shape).cuda().half())
     # warm up

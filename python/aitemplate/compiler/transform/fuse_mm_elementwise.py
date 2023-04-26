@@ -17,18 +17,20 @@ Fuse GEMM with elementwise operations
 """
 from typing import List
 
-from ..base import Tensor
-from ..ops.common import elementwise
-from ..ops.common.epilogue import FuncEnum
-from ..ops.gemm_universal import gemm_rcr, gemm_rcr_bias, gemm_rcr_bias_swish
+from aitemplate.compiler.base import Tensor
+from aitemplate.compiler.ops.common.epilogue import FuncEnum
+from aitemplate.compiler.ops.gemm_universal import gemm_rcr_bias_swish
 
-from .fuse_mm_elementwise_patterns import get_patterns
-from .fuse_utils import (
+from aitemplate.compiler.transform.fuse_mm_elementwise_patterns import (
+    get_gemm_rcr_bias_patterns,
+    get_patterns,
+)
+from aitemplate.compiler.transform.fuse_utils import (
     extract_only_one_op,
     is_elementwise_type,
     transform_simple_fusion_patterns,
 )
-from .transform_utils import (
+from aitemplate.compiler.transform.transform_utils import (
     copy_tensor_attributes,
     remove_dst_op_from_tensor,
     remove_single_tensor_op_from_sorted_graph,
@@ -178,14 +180,7 @@ def _fuse_gemm_rcr_bias_swish(sorted_graph: List[Tensor]) -> List[Tensor]:
 
 
 def _transform_gemm_bias(sorted_graph: List[Tensor]) -> List[Tensor]:
-    gemm_rcr_bias_patterns = [
-        (
-            (gemm_rcr(), elementwise(FuncEnum.ADD)),
-            gemm_rcr_bias,
-        ),
-    ]
-
-    return transform_simple_fusion_patterns(sorted_graph, gemm_rcr_bias_patterns)
+    return transform_simple_fusion_patterns(sorted_graph, get_gemm_rcr_bias_patterns())
 
 
 def _transform_mm_elementwise(sorted_graph: List[Tensor]) -> List[Tensor]:

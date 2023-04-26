@@ -21,10 +21,10 @@ from typing import List
 
 import jinja2
 
-from .... import backend
-from ....backend import registry
-from ....utils import shape_utils
-from ...base import IntVar, Operator, Tensor
+from aitemplate import backend
+from aitemplate.backend import registry
+from aitemplate.compiler.base import IntVar, Operator, Tensor
+from aitemplate.utils import shape_utils
 
 # pylint: disable=C0103,W0221,W0102,W0223
 
@@ -94,7 +94,7 @@ class batch_gather(Operator):
         self._set_depth()
         self._extract_exec_path(x)
         output_shape = self._infer_shapes(x, indices)
-        output = Tensor(output_shape, src_ops={self})
+        output = Tensor(output_shape, src_ops={self}, dtype=x.dtype())
         self._attrs["outputs"] = [output]
         return output
 

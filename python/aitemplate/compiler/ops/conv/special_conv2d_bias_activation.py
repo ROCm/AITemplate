@@ -15,9 +15,10 @@
 """
 Fused special_conv2d_bias_activation op.
 """
-from ...base import Tensor
-from ..padding import nhwc3to4, nhwc3to8
-from .conv2d import conv2d
+from aitemplate.compiler.base import Tensor
+from aitemplate.compiler.ops.conv.conv2d import conv2d
+from aitemplate.compiler.ops.padding import nhwc3to4, nhwc3to8
+
 
 # pylint: disable=C0103
 class special_conv2d_bias_activation(conv2d):
@@ -80,7 +81,7 @@ class special_conv2d_bias_activation(conv2d):
         self._attrs["inputs"] = [x, w, b]
         self._set_depth()
         output_shape = self._infer_shapes(x, w)
-        output = Tensor(output_shape, src_ops={self})
+        output = Tensor(output_shape, src_ops={self}, dtype=x._attrs["dtype"])
         self._extract_exec_path(x)
         self._extract_epilogue_alignment(output_shape)
         self._attrs["outputs"] = [output]

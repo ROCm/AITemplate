@@ -22,10 +22,10 @@ from typing import Any, Dict, List
 
 import jinja2
 
-from .... import backend
-from ....backend import registry
-from ....utils import shape_utils
-from ...base import IntImm, IntVar, Operator, Tensor
+from aitemplate import backend
+from aitemplate.backend import registry
+from aitemplate.compiler.base import IntImm, IntVar, Operator, Tensor
+from aitemplate.utils import shape_utils
 
 # pylint: disable=C0103,W0221,R1732,W0102,W1202,C0301,R1716
 
@@ -94,7 +94,7 @@ EXEC_COND_TEMPLATE = jinja2.Template(
 class depthwise_conv3d(Operator):
     r"""depthwise_conv3d"""
 
-    def __init__(self, stride, pad, dilate=1, group=1) -> None:
+    def __init__(self, stride, pad, dilate=1, group=1, bias=False) -> None:
         """Conv3d constructor.
 
         Parameters
@@ -110,7 +110,7 @@ class depthwise_conv3d(Operator):
             channels to output channels, by default 1
         """
         super().__init__()
-        self._attrs["op"] = "depthwise_conv3d"
+        self._attrs["op"] = "depthwise_conv3d_bias" if bias else "depthwise_conv3d"
         self._attrs["stride"] = stride
         if isinstance(stride, int):
             self._attrs["stride"] = (stride, stride, stride)
@@ -126,6 +126,7 @@ class depthwise_conv3d(Operator):
         self._attrs["epilogue"] = "LinearCombination"
         self._attrs["workspace"] = 0
         self._attrs["split_k"] = None
+        self._attrs["bias"] = bias
         self.shape_eval_template = SHAPE_FUNC_TEMPLATE
         self.shape_save_template = SHAPE_ASSIGNMENT_TEMPLATE
         self.exec_key_template = EXEC_KEY_TEMPLATE
@@ -186,7 +187,7 @@ class depthwise_conv3d(Operator):
             return sorted(set(vector))
 
         output_shape = [
-            shape_utils.gen_int_var(unique([d[0] for d in y_shapes])),
+            x._attrs["shape"][0],
             shape_utils.gen_int_var(unique([d[1] for d in y_shapes])),
             shape_utils.gen_int_var(unique([d[2] for d in y_shapes])),
             shape_utils.gen_int_var(unique([d[3] for d in y_shapes])),
@@ -247,7 +248,7 @@ class depthwise_conv3d(Operator):
         elif shape % 2 == 0:
             self._attrs["epilogue_alignment"] = 2
 
-    def __call__(self, x: Tensor, w: Tensor) -> List[Tensor]:
+    def __call__(self, x: Tensor, w: Tensor, bias: Tensor = None) -> List[Tensor]:
         """Call depthwise_conv3d with tensors x, w
 
         Parameters
@@ -263,16 +264,18 @@ class depthwise_conv3d(Operator):
             includes the output tensor in shape (N, T_out, H_out, W_out, C_out)
         """
         self._attrs["inputs"] = [x, w]
+        if bias:
+            self._attrs["inputs"].append(bias)
         self._set_depth()
         output_shape = self._infer_shapes(x, w)
         self._extract_exec_path(x)
         self._extract_epilogue_alignment(output_shape)
-        output = Tensor(output_shape, src_ops={self})
+        output = Tensor(output_shape, src_ops={self}, dtype=x._attrs["dtype"])
         self._attrs["outputs"] = [output]
         return output
 
     def _get_op_attributes(self) -> Dict[str, Any]:
-        target_attrs = ["dilate", "group", "pad", "stride"]
+        target_attrs = ["dilate", "group", "pad", "stride", "bias"]
         attr = {}
 
         for target_attr in target_attrs:

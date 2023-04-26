@@ -16,9 +16,9 @@
 permute021 for cuda
 """
 
-from ... import registry
-from ...backend_spec import CUDASpec
-from ...common.tensor import permute021_common
+from aitemplate.backend import registry
+from aitemplate.backend.backend_spec import CUDASpec
+from aitemplate.backend.common.tensor import permute021_common
 
 # pylint: disable=C0301,W0613,W0612
 
@@ -31,7 +31,10 @@ Header_files = """
 
 
 @registry.reg("cuda.permute021.gen_function")
-def gen_function(func_attrs, template_path, shape_eval_template, shape_save_template):
+def gen_function(
+    func_attrs,
+    template_path,
+):
     """
     Parameters
     ----------
@@ -39,8 +42,6 @@ def gen_function(func_attrs, template_path, shape_eval_template, shape_save_temp
         Attributes from Operator
     template_path : str
         path to library used
-    shape_eval_template : jinja template
-    shape_save_template : jinja template
 
     Returns
     -------
@@ -50,8 +51,6 @@ def gen_function(func_attrs, template_path, shape_eval_template, shape_save_temp
     return permute021_common.gen_function(
         func_attrs,
         template_path,
-        shape_eval_template,
-        shape_save_template,
         Header_files,
         CUDASpec(),
     )
@@ -74,7 +73,10 @@ def gen_function_decl(func_attrs):
 
 
 @registry.reg("cuda.permute021.func_call")
-def gen_function_call(func_attrs, indent="  "):
+def gen_function_call(
+    func_attrs,
+    indent="  ",
+):
     """
     Parameters
     ----------

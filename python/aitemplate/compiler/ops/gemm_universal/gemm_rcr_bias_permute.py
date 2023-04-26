@@ -18,12 +18,12 @@ gemm rcr with bias + permute
 
 from typing import Tuple
 
-from aitemplate.testing import detect_target
+from aitemplate.compiler.base import Tensor
+from aitemplate.compiler.ops.common import reshape
+from aitemplate.compiler.ops.gemm_universal import gemm_rcr_bias
+from aitemplate.compiler.tensor_accessor import TensorAccessor
 
-from ...base import Tensor
-from ...tensor_accessor import TensorAccessor
-from ..common import reshape
-from . import gemm_rcr_bias
+from aitemplate.testing import detect_target
 
 # pylint: disable=C0103,W0223,W0221,W0613
 
@@ -53,7 +53,7 @@ class gemm_rcr_bias_permute(gemm_rcr_bias):
         self._sanity_check(a, b)
         output_shape = self._infer_shapes(a, b, bias)
 
-        output = Tensor(output_shape, src_ops={self})
+        output = Tensor(output_shape, src_ops={self}, dtype=a.dtype())
         self._attrs["outputs"] = [output]
         self._attrs["output_accessors"] = [TensorAccessor(output)]
 

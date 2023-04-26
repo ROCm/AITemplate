@@ -18,15 +18,16 @@ Fuse parallel gemms into bmm op.
 
 from typing import Callable, List, Tuple
 
-from ...utils import graph_utils
-from ...utils.shape_utils import is_static_dimension
-from .. import ops
-from ..base import Operator, Tensor
-from ..ops.gemm_universal.gemm_common import default_align_ab
-from ..tensor_accessor import TensorAccessor
-from . import transform_utils
-from .toposort import toposort
-from .transform_strided_ops import _is_supported_op
+from aitemplate.compiler import ops
+from aitemplate.compiler.base import Operator, Tensor
+from aitemplate.compiler.ops.gemm_universal.gemm_common import default_align_ab
+from aitemplate.compiler.tensor_accessor import TensorAccessor
+from aitemplate.compiler.transform import transform_utils
+from aitemplate.compiler.transform.toposort import toposort
+from aitemplate.compiler.transform.transform_strided_ops import _is_supported_op
+
+from aitemplate.utils import graph_utils
+from aitemplate.utils.shape_utils import is_static_dimension
 
 
 def _is_same_shape(gemm_op1: Operator, gemm_op2: Operator) -> bool:
@@ -55,6 +56,10 @@ def _is_valid_gemm_op(tensor: Tensor, f_check_src_op: Callable) -> bool:
         bool: True if src_op of tensor is a valid gemm op
     """
     if len(tensor.dst_ops()) != 1 or len(tensor.src_ops()) != 1:
+        return False
+
+    # Don't fuse if tensor is an output tensor
+    if tensor._attrs["is_output"]:
         return False
 
     gemm_op = list(tensor.src_ops())[0]
@@ -170,8 +175,9 @@ def _merge_parallel_gemm_concat(
     n, k = weights[0].shape()[0].value(), weights[0].shape()[1].value()
     b = len(weights)
 
-    rcr_align = default_align_ab(k, k)
-    rrr_align = default_align_ab(k, n)
+    dtype = inputs[0].dtype()
+    rcr_align = default_align_ab(k, k, dtype)
+    rrr_align = default_align_ab(k, n, dtype)
 
     use_rcr = rcr_align > rrr_align
 
@@ -216,7 +222,7 @@ def _merge_parallel_gemm_concat(
 
         cat_op._attrs["inputs"] = new_inputs
         cat_op._attrs["input_accessors"] = [TensorAccessor(t) for t in new_inputs]
-        cat_op._attrs["original_inputs"] = new_inputs
+        cat_op._attrs["original_inputs"] = list(new_inputs)
         cat_op._attrs["input_masks"] = [True] * len(new_inputs)
 
         bmm_reshape._attrs["dst_ops"].add(cat_op)

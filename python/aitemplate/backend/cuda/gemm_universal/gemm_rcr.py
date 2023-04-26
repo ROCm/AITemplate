@@ -19,11 +19,11 @@ where A[RowMajor][M, K], B[ColMajor][N, K]
 """
 import jinja2
 
-from ... import registry
+from aitemplate.backend import registry
 
-from ...backend_spec import CUDASpec
-from . import common
-from .layout import RCR
+from aitemplate.backend.backend_spec import CUDASpec
+from aitemplate.backend.cuda.gemm_universal import common
+from aitemplate.backend.cuda.gemm_universal.layout import RCR
 
 # pylint: disable=C0103,C0415,W0613,C0301,R1705,R1703
 
@@ -47,22 +47,22 @@ ARGS_PARSER_TEMPLATE = jinja2.Template(
 # used for real execution
 PROBLEM_ARGS_TEMPLATE = jinja2.Template(
     """
-    cutlass::gemm::GemmUniversalMode::kGemm,
-    {M, N, K},
-    split_k,
-    {ElementComputeEpilogue(1), ElementComputeEpilogue(0)},
-    ({{elem_input_type}}*)(a_ptr) + input_a_offset,
-    ({{elem_input_type}}*)(b_ptr) + input_b_offset,
-    ({{elem_output_type}}*)(c_ptr) + output_offset,
-    ({{elem_output_type}}*)(c_ptr) + output_offset,
-    input_a_batch_stride,
-    input_b_batch_stride,
-    /*output_batch_stride*/ M * N,
-    /*output_batch_stride*/ M * N,
-    input_a_stride,
-    input_b_stride,
-    output_stride,
-    output_stride
+    cutlass::gemm::GemmUniversalMode::kGemm,                 // GemmUniversalMode mode
+    {M, N, K},                                               // GemmCoord problem_size
+    split_k,                                                 // int batch_count
+    {ElementComputeEpilogue(1), ElementComputeEpilogue(0)},  // typename EpilogueOutputOp::Params epilogue
+    ({{elem_input_type}}*)(a_ptr) + input_a_offset,          // void const * ptr_A
+    ({{elem_input_type}}*)(b_ptr) + input_b_offset,          // void const * ptr_B
+    ({{elem_output_type}}*)(c_ptr) + output_offset,          // void const * ptr_C
+    ({{elem_output_type}}*)(c_ptr) + output_offset,          // void * ptr_D
+    input_a_batch_stride,                                    // int64_t batch_stride_A
+    input_b_batch_stride,                                    // int64_t batch_stride_B
+    /*output_batch_stride*/ M * N,                           // int64_t batch_stride_C
+    /*output_batch_stride*/ M * N,                           // int64_t batch_stride_D
+    input_a_stride,                                          // typename LayoutA::Stride::LongIndex lda
+    input_b_stride,                                          // typename LayoutB::Stride::LongIndex ldb
+    output_stride,                                           // typename LayoutC::Stride::LongIndex ldc
+    output_stride,                                           // typename LayoutC::Stride::LongIndex ldd
 """
 )
 
@@ -70,22 +70,22 @@ PROBLEM_ARGS_TEMPLATE = jinja2.Template(
 # for profiler, no need to include TensorAccessor
 PROFILER_PROBLEM_ARGS_TEMPLATE = jinja2.Template(
     """
-    cutlass::gemm::GemmUniversalMode::kGemm,
-    {M, N, K},
-    split_k,
-    {ElementComputeEpilogue(1), ElementComputeEpilogue(0)},
-    ({{elem_input_type}}*)(a_ptr),
-    ({{elem_input_type}}*)(b_ptr),
-    ({{elem_output_type}}*)(c_ptr),
-    ({{elem_output_type}}*)(c_ptr) + output_offset,
-    M * K,
-    N * K,
-    M * N,
-    M * N,
-    K,
-    K,
-    N,
-    output_stride
+    cutlass::gemm::GemmUniversalMode::kGemm,                 // GemmUniversalMode mode
+    {M, N, K},                                               // GemmCoord problem_size
+    split_k,                                                 // int batch_count
+    {ElementComputeEpilogue(1), ElementComputeEpilogue(0)},  // typename EpilogueOutputOp::Params epilogue
+    ({{elem_input_type}}*)(a_ptr),                           // void const * ptr_A
+    ({{elem_input_type}}*)(b_ptr),                           // void const * ptr_B
+    ({{elem_output_type}}*)(c_ptr),                          // void const * ptr_C
+    ({{elem_output_type}}*)(c_ptr) + output_offset,          // void * ptr_D
+    M * K,                                                   // int64_t batch_stride_A
+    N * K,                                                   // int64_t batch_stride_B
+    M * N,                                                   // int64_t batch_stride_C
+    M * N,                                                   // int64_t batch_stride_D
+    K,                                                       // typename LayoutA::Stride::LongIndex lda
+    K,                                                       // typename LayoutB::Stride::LongIndex ldb
+    N,                                                       // typename LayoutC::Stride::LongIndex ldc
+    output_stride,                                           // typename LayoutC::Stride::LongIndex ldd
 """
 )
 

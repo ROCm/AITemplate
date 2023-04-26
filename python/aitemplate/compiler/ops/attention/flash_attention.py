@@ -21,10 +21,10 @@ from typing import List
 
 import jinja2
 
-from .... import backend
-from ....backend import registry
-from ....utils import shape_utils
-from ...base import Operator, Tensor
+from aitemplate import backend
+from aitemplate.backend import registry
+from aitemplate.compiler.base import Operator, Tensor
+from aitemplate.utils import shape_utils
 
 # pylint: disable=C0103,W0221,W0102,W0223
 
@@ -60,7 +60,7 @@ class flash_attention(Operator):
     """
 
     def __init__(self, batch_size, dropout, max_seq_len, causal) -> None:
-        """initilize attention module"""
+        """Initialize attention module"""
         super().__init__()
         assert dropout == 0
         self._attrs["op"] = "flash_attention"

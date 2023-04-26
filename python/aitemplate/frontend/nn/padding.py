@@ -15,8 +15,8 @@
 """
 Padding related modules.
 """
-from ...compiler.ops import nhwc3to8
-from .module import Module
+from aitemplate.compiler.ops import ndhwc3to8, nhwc3to8
+from aitemplate.frontend.nn.module import Module
 
 
 class Nhwc3to8(Module):
@@ -25,6 +25,19 @@ class Nhwc3to8(Module):
     def __init__(self):
         super().__init__()
         self.op = nhwc3to8()
+
+    def forward(self, *args):
+        assert len(args) == 1
+        x = args[0]
+        return self.op(x)
+
+
+class Ndhwc3to8(Module):
+    r"""Pads the input data with ndhwc dimensions from 3 channels to 8 channels"""
+
+    def __init__(self):
+        super().__init__()
+        self.op = ndhwc3to8()
 
     def forward(self, *args):
         assert len(args) == 1

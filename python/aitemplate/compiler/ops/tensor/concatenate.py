@@ -15,14 +15,15 @@
 """
 Concatenate.
 """
+from functools import reduce
 from typing import List, Sequence, Union
 
-from .... import backend
-from ....backend import registry
-from ....utils import shape_utils
-from ....utils.tensor_utils import wrap_dim
-from ...base import IntVar, Operator, Tensor
-from ...tensor_accessor import TensorAccessor
+from aitemplate import backend
+from aitemplate.backend import registry
+from aitemplate.compiler.base import IntVar, Operator, Tensor
+from aitemplate.compiler.tensor_accessor import TensorAccessor
+from aitemplate.utils import shape_utils
+from aitemplate.utils.tensor_utils import wrap_dim
 
 # pylint: disable=C0103,W0221
 
@@ -41,17 +42,24 @@ class concatenate(Operator):
 
     """
 
-    def __init__(self) -> None:
+    def __init__(self, fast_cat=True) -> None:
+        # TMP: note that fast_cat is a temporary flag to force backend to select
+        # the fast concat implementation. After we finish benchmark fast concat,
+        # we should remove this flag. Instead, we will rely on backend to dispatch
+        # to the appropriate implementation based on input shapes if the fast
+        # concat couldn't handle all cases. If the fast concat is complete, we
+        # can remove the old concat kernel.
         super().__init__()
         self._attrs["op"] = "concatenate"
         self._attrs["has_profiler"] = False
+        self._attrs["fast_cat"] = fast_cat
 
     def _unique(self, vector):
         return sorted(set(vector))
 
-    def _infer_shapes(self, inputs: List[Tensor], dim) -> List[IntVar]:
-        """Infers shapes for concatenate."""
-
+    @staticmethod
+    def check_rank(inputs: List[Tensor], dim) -> bool:
+        """check if the rank is valid"""
         if len(inputs) < 1:
             raise RuntimeError("expected a list of Tensors")
         x = inputs[0]
@@ -60,18 +68,20 @@ class concatenate(Operator):
             raise RuntimeError("expected a non-scalar tensor")
         if dim >= rank:
             raise RuntimeError(
-                "concat_dim ({dim}) expected to be less than rank ({rank})".format(
-                    dim=dim, rank=rank
-                )
+                f"concat_dim ({dim}) expected to be less than rank ({rank})"
             )
         for t in inputs:
             r = len(t._attrs["shape"])
             if r != rank:
                 raise RuntimeError(
-                    "tensors expected to have the same rank, got {} and {}".format(
-                        r, rank
-                    )
+                    f"tensors expected to have the same rank but got {rank=} "
+                    f'and {r=} for tensor {t._attrs["name"]}'
                 )
+
+    def _infer_shapes(self, inputs: List[Tensor], dim) -> List[IntVar]:
+        """Infers shapes for concatenate."""
+        concatenate.check_rank(inputs, dim)
+
         input_shapes = [i._attrs["shape"] for i in inputs]
         output_shape = []
         input_shape_values = [
@@ -81,9 +91,17 @@ class concatenate(Operator):
             if idx == dim:
                 min_value_sum = sum(value[0] for value in lst)
                 max_value_sum = sum(value[-1] for value in lst)
-                output_shape.append(
-                    shape_utils.gen_int_var([min_value_sum, max_value_sum])
+                sym_val = reduce(
+                    lambda x, y: x + y,
+                    [
+                        input_shape[idx]._attrs["symbolic_value"]
+                        for input_shape in input_shapes
+                    ],
                 )
+                shape_var = shape_utils.gen_int_var(
+                    [min_value_sum, max_value_sum], symbolic_value=sym_val
+                )
+                output_shape.append(shape_var)
             else:
                 output_dim = input_shapes[0][idx]
                 for shape in input_shapes:

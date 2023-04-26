@@ -16,6 +16,7 @@
 Base class for conv2d.
 """
 import itertools
+import logging
 import os
 import re
 from collections import OrderedDict
@@ -24,15 +25,28 @@ from typing import Any, Dict, List
 
 import jinja2
 
-from .... import backend
-from ....backend import registry
-from ....backend.target import Target
-from ....utils import logger, shape_utils
-from ...base import DynamicProfileStrategy, IntImm, IntVar, Operator, Tensor
-from .cache_entry import ConvQueryEntry, ConvRecordEntry
+from aitemplate import backend
+from aitemplate.backend import registry
+from aitemplate.backend.target import Target
+from aitemplate.compiler.base import (
+    DynamicProfileStrategy,
+    IntImm,
+    IntVar,
+    Operator,
+    Tensor,
+)
+from aitemplate.compiler.ops.conv.cache_entry import ConvQueryEntry, ConvRecordEntry
+from aitemplate.compiler.ops.conv.conv_common import (
+    filter_op_instances,
+    generate_profiler_sources,
+    get_profiler_filename,
+)
+from aitemplate.utils import alignment, environ, shape_utils
 
 # pylint: disable=C0103,W0221,R1732,W0102,W1202,C0301,R1716
 
+
+_LOGGER = logging.getLogger(__name__)
 
 SHAPE_FUNC_TEMPLATE = jinja2.Template(
     """
@@ -43,12 +57,12 @@ SHAPE_FUNC_TEMPLATE = jinja2.Template(
 {{indent}}{{dtype}}CO = {{w_dim0}};
 {{indent}}{{dtype}}KH = {{w_dim1}};
 {{indent}}{{dtype}}KW = {{w_dim2}};
-{{indent}}{{dtype}}SH = {{stride}};
-{{indent}}{{dtype}}SW = {{stride}};
-{{indent}}{{dtype}}DH = {{dilate}};
-{{indent}}{{dtype}}DW = {{dilate}};
-{{indent}}{{dtype}}PH = {{pad}};
-{{indent}}{{dtype}}PW = {{pad}};
+{{indent}}{{dtype}}SH = {{strideh}};
+{{indent}}{{dtype}}SW = {{stridew}};
+{{indent}}{{dtype}}DH = {{dilateh}};
+{{indent}}{{dtype}}DW = {{dilatew}};
+{{indent}}{{dtype}}PH = {{padh}};
+{{indent}}{{dtype}}PW = {{padw}};
 {{indent}}{{dtype}}KHEff = (KH - 1) * DH + 1;
 {{indent}}{{dtype}}KWEff = (KW - 1) * DW + 1;
 {{indent}}{{dtype}}NO = NI;
@@ -74,7 +88,10 @@ NI == {{x_dim0}} && HI == {{x_dim1}} && WI == {{x_dim2}} && CI == {{x_dim3}}
 
 EXEC_DYN_KEY_TEMPLATE = jinja2.Template(
     """
-NI >= {{x_dim0_lb}} && NI <= {{x_dim0_ub}} && HI == {{x_dim1}} && WI == {{x_dim2}} && CI == {{x_dim3}}
+NI >= {{x_dim0_lb}} && NI <= {{x_dim0_ub}} &&
+ HI >= {{x_dim1_lb}} && HI <= {{x_dim1_ub}} &&
+ WI >= {{x_dim2_lb}} && WI <= {{x_dim2_ub}} &&
+ CI == {{x_dim3}}
 """
 )
 
@@ -175,16 +192,36 @@ class conv2d(Operator):
         self.exec_dyn_key_template = EXEC_DYN_KEY_TEMPLATE
         self.exec_cond_template = EXEC_COND_TEMPLATE
 
+    def _get_params_factory(self):
+        params_factory = {}
+        if isinstance(self._attrs["stride"], int):
+            params_factory["strideh"] = self._attrs["stride"]
+            params_factory["stridew"] = self._attrs["stride"]
+        else:
+            params_factory["strideh"] = self._attrs["stride"][0]
+            params_factory["stridew"] = self._attrs["stride"][1]
+        if isinstance(self._attrs["pad"], int):
+            params_factory["padh"] = self._attrs["pad"]
+            params_factory["padw"] = self._attrs["pad"]
+        else:
+            params_factory["padh"] = self._attrs["pad"][0]
+            params_factory["padw"] = self._attrs["pad"][1]
+        if isinstance(self._attrs["dilate"], int):
+            params_factory["dilateh"] = self._attrs["dilate"]
+            params_factory["dilatew"] = self._attrs["dilate"]
+        else:
+            params_factory["dilateh"] = self._attrs["dilate"][0]
+            params_factory["dilatew"] = self._attrs["dilate"][1]
+        return params_factory
+
     def _infer_shape(self, x: List[int], w: List[int]) -> List[int]:
         if x[3] != w[3] * self._attrs["group"]:
             raise RuntimeError("X/W Shape mismatch for conv2d")
+
         eval_func = self.shape_eval_template.render(
             indent="",
             dtype="",
             div="//",
-            stride=self._attrs["stride"],
-            pad=self._attrs["pad"],
-            dilate=self._attrs["dilate"],
             x_dim0=x[0],
             x_dim1=x[1],
             x_dim2=x[2],
@@ -192,6 +229,7 @@ class conv2d(Operator):
             w_dim0=w[0],
             w_dim1=w[1],
             w_dim2=w[2],
+            **self._get_params_factory(),
         )
         output = {}
         exec(eval_func, output)  # noqa: P204
@@ -219,7 +257,7 @@ class conv2d(Operator):
             return sorted(set(vector))
 
         output_shape = [
-            shape_utils.gen_int_var(unique([d[0] for d in y_shapes])),
+            x._attrs["shape"][0],
             shape_utils.gen_int_var(unique([d[1] for d in y_shapes])),
             shape_utils.gen_int_var(unique([d[2] for d in y_shapes])),
             shape_utils.gen_int_var(unique([d[3] for d in y_shapes])),
@@ -235,40 +273,43 @@ class conv2d(Operator):
             x_dim0=shape[0], x_dim1=shape[1], x_dim2=shape[2], x_dim3=shape[3]
         ).replace("\n", "")
 
-    def _gen_dyn_exec_key(self, dim0_lb, dim0_ub, dim1, dim2, dim3):
+    def _gen_dyn_exec_key(
+        self, dim0_lb, dim0_ub, dim1_lb, dim1_ub, dim2_lb, dim2_ub, dim3
+    ):
         return self.exec_dyn_key_template.render(
-            x_dim0_lb=dim0_lb, x_dim0_ub=dim0_ub, x_dim1=dim1, x_dim2=dim2, x_dim3=dim3
+            x_dim0_lb=dim0_lb,
+            x_dim0_ub=dim0_ub,
+            x_dim1_lb=dim1_lb,
+            x_dim1_ub=dim1_ub,
+            x_dim2_lb=dim2_lb,
+            x_dim2_ub=dim2_ub,
+            x_dim3=dim3,
         ).replace("\n", "")
 
     def _extract_exec_path(self, x: Tensor):
         x_shape_values = [var._attrs["values"] for var in x._attrs["shape"]]
+        # FIXME: we take the max height and weight for profiling at the moment.
+        # Let's figure out a better profiling strategy later.
+        # The following attribute is temporarily used to hold the lower bounds of
+        # all dimensions. We will remove them later once we have a better profiling
+        # strategy.
+        self._attrs["dim_lower_bounds"] = [min(vals) for vals in x_shape_values]
+        x_shape_values = [x_shape_values[0]] + [[max(vs)] for vs in x_shape_values[1:]]
+
         x_shapes = itertools.product(*x_shape_values)
         self._attrs["exec_path"] = OrderedDict()
         for x_shape in x_shapes:
             key = self._gen_exec_key(x_shape)
             self._attrs["exec_path"][key] = ""
 
-    def _signature(self):
-        signature = "conv2d: K=[{kh}, {kw}], S=[{s}], P=[{p}], CO=[{co}]".format(
-            kh=self._attrs["KH"],
-            kw=self._attrs["KW"],
-            s=self._attrs["stride"],
-            p=self._attrs["pad"],
-            co=self._attrs["CO"],
-        )
-        return signature
-
     def _extract_epilogue_alignment(self, output_shape: List[IntVar]) -> None:
         epilogue_dim = output_shape[-1]
         if not isinstance(epilogue_dim, IntImm):
             raise RuntimeError("Conv output last dimension must be static!")
-        shape = epilogue_dim._attrs["values"][0]
-        if shape % 8 == 0:
-            self._attrs["epilogue_alignment"] = 8
-        elif shape % 4 == 0:
-            self._attrs["epilogue_alignment"] = 4
-        elif shape % 2 == 0:
-            self._attrs["epilogue_alignment"] = 2
+        self._attrs["epilogue_alignment"] = alignment.find_max_alignment(
+            number=epilogue_dim._attrs["values"][0],
+            dtype=self._attrs["inputs"][0]._attrs["dtype"],
+        )
 
     def __call__(self, x: Tensor, w: Tensor) -> List[Tensor]:
         """Call conv2d with tensors x, w
@@ -290,7 +331,7 @@ class conv2d(Operator):
         output_shape = self._infer_shapes(x, w)
         self._extract_exec_path(x)
         self._extract_epilogue_alignment(output_shape)
-        output = Tensor(output_shape, src_ops={self})
+        output = Tensor(output_shape, src_ops={self}, dtype=x._attrs["dtype"])
         self._attrs["outputs"] = [output]
         return output
 
@@ -303,6 +344,73 @@ class conv2d(Operator):
                 attr[target_attr] = self._attrs[target_attr]
 
         return attr
+
+    def _should_build_profiler(self) -> bool:
+        """
+        Check if we should build profilers. If we have a cached
+        entry for this conv instance, we update this conv op's
+        relevant attributes with the cached result and return False.
+        """
+        force_cache = environ.force_profiler_cache()
+        if self._has_dynamic_input_dims():
+            if force_cache:
+                raise RuntimeError(
+                    "We cannot force to use the cache as dynamic dims require "
+                    "us to generate and build the profilers"
+                )
+            # If there are dynamic dims, we'll have to generate and build the
+            # profilers, as the binaries will be needed for dynamic profiling.
+            return True
+        # We are forced to use the cache so we skip building profilers.
+        if force_cache:
+            return False
+
+        target = backend.target.Target.current()
+        workloads = list(self._attrs["exec_path"].keys())
+
+        build_profiler = True
+        # Now, let's query if all of our workloads have cache entries. If that
+        # is the case, it is safely to skip generating and building profilers.
+        if not target.use_dummy_profiling_results():
+            tmp_key = next(iter(self._attrs["op_instance"].keys()))
+            tmp_op = self._attrs["op_instance"][tmp_key]
+            build_profiler = False
+            for wkl in workloads:
+                exec_entry_sha1 = sha1(wkl.encode("utf-8")).hexdigest()
+                split_k = (
+                    1 if self._attrs["split_k"] is None else self._attrs["split_k"]
+                )
+                query = ConvQueryEntry(
+                    dtype_a=tmp_op.A.element.value,
+                    dtype_b=tmp_op.B.element.value,
+                    dtype_c=tmp_op.C.element.value,
+                    dtype_acc=tmp_op.accumulator_type().value,
+                    major_a=tmp_op.A.layout.value,
+                    major_b=tmp_op.B.layout.value,
+                    major_c=tmp_op.C.layout.value,
+                    kh=self._attrs["KH"],
+                    kw=self._attrs["KW"],
+                    co=self._attrs["CO"],
+                    op_type=self._attrs["op"],
+                    device=target._arch,
+                    epilogue=tmp_op.epilogue_functor.value,
+                    split_k=split_k,
+                    exec_entry_sha1=exec_entry_sha1,
+                    **self._get_params_factory(),
+                )
+                cache_value = target.query_profile_cache("conv", query.__dict__)
+                if cache_value is not None and not target.force_profile():
+                    _LOGGER.info(
+                        f'Load profiling result for {self._attrs["name"]} '
+                        f"from cache: {cache_value}",
+                    )
+                    best_algo, workspace = cache_value
+                    self._attrs["exec_path"][wkl] = best_algo
+                    self._attrs["workspace"] = max(self._attrs["workspace"], workspace)
+                else:
+                    # cache miss - we will have to generate and build profilers
+                    build_profiler = True
+        return build_profiler
 
     def gen_profiler(
         self,
@@ -325,17 +433,28 @@ class conv2d(Operator):
         )
         func = registry.get(func_key)
         func(self._attrs)
-        func_key = "{target}.{op}.gen_profiler".format(
-            target=target.name(), op=self._attrs["op"]
-        )
-        func = registry.get(func_key)
-        return func(self._attrs, workdir, self.shape_eval_template)
+
+        if self._should_build_profiler():
+            x_shapes = [
+                self._invert_exec_key(exec_key) for exec_key in self._attrs["exec_path"]
+            ]
+            self._attrs["op_instance"] = filter_op_instances(
+                func_attrs=self._attrs,
+                x_shapes=x_shapes,
+            )
+            return generate_profiler_sources(
+                func_attrs=self._attrs,
+                op_class="conv",
+                workdir=workdir,
+                shape_template=self.shape_eval_template,
+            )
 
     def _gen_profile_cmd(self, profiler_prefix, cfg, x_shape):
         exe_path = os.path.join(profiler_prefix, cfg)
         if not os.access(exe_path, os.X_OK):
             raise RuntimeError("Profiler %s is not executable" % exe_path)
         cmd = [exe_path]
+        params = self._get_params_factory()
         cmd.append(x_shape[0])
         cmd.append(x_shape[1])
         cmd.append(x_shape[2])
@@ -343,21 +462,18 @@ class conv2d(Operator):
         cmd.append(self._attrs["KH"])
         cmd.append(self._attrs["KW"])
         cmd.append(self._attrs["CO"])
-        cmd.append(self._attrs["stride"])
-        cmd.append(self._attrs["pad"])
-        cmd.append(self._attrs["dilate"])
+        cmd.append(params["strideh"])
+        cmd.append(params["padh"])
+        cmd.append(params["dilateh"])
+        cmd.append(params["stridew"])
+        cmd.append(params["padw"])
+        cmd.append(params["dilatew"])
         cmd.append(self._attrs["group"])
         command = [str(x) for x in cmd]
         return command
 
-    def _profile_single_workload(self, profiler_prefix, exec_key, devices):
+    def _profile_single_workload(self, profiler_prefix, exec_key, devices, force_cache):
         target = backend.target.Target.current()
-        # if in CI just choose minimal configs
-        # workspace is a hack just provides 102400 Byte
-        if target.use_dummy_profiling_results():
-            algo = target.select_minimal_algo(list(self._attrs["op_instance"].keys()))
-            logger.info(__name__, f"Select minimal algo {algo} for CI")
-            return (algo, 102400)
         # query cache
         tmp_key = next(iter(self._attrs["op_instance"].keys()))
         tmp_op = self._attrs["op_instance"][tmp_key]
@@ -374,50 +490,63 @@ class conv2d(Operator):
             kh=self._attrs["KH"],
             kw=self._attrs["KW"],
             co=self._attrs["CO"],
-            stride=self._attrs["stride"],
-            pad=self._attrs["pad"],
-            dilate=self._attrs["dilate"],
             op_type=self._attrs["op"],
             device=target._arch,
             epilogue=tmp_op.epilogue_functor.value,
             split_k=split_k,
             exec_entry_sha1=exec_entry_sha1,
+            **self._get_params_factory(),
         )
         cache_value = target.query_profile_cache("conv", query.__dict__)
         if cache_value is not None and not target.force_profile():
-            logger.info(__name__, "Load profiling result from cache.")
+            _LOGGER.info("Load profiling result from cache.")
             return cache_value
+        if cache_value is None and force_cache:
+            op_type = self._attrs["op"]
+            raise RuntimeError(
+                "force_cache is enabled but we could not find the following cache ",
+                f"available on device {target._arch=}, {op_type=}, {exec_entry_sha1=}",
+            )
         if target.use_dummy_profiling_results():
             op_type = self._attrs["op"]
             raise Exception(
                 "This is a CI run but we could not find the following cache ",
                 f"available on device {target._arch}\n",
                 f"{op_type} {exec_entry_sha1}.\n",
-                "To bypass, you need to make it available in the db table.",
+                "Please adjust target.select_minimal_algo function.",
             )
-
-        func_key = "{target}.{op}.filter".format(
-            target=target.name(), op=self._attrs["op"]
-        )
-        func = registry.get(func_key)
-        content = list(self._attrs["op_instance"].keys())
-        runner = backend.profiler_runner.Runner(devices, self._attrs["name"])
-        x_shape = self._invert_exec_key(exec_key)
-        for cfg in content:
-            if not func(cfg, self._attrs, x_shape):
-                continue
-            command = self._gen_profile_cmd(profiler_prefix, cfg, x_shape)
-            logger.info(__name__, "Running " + " ".join(command))
-            runner.push(cfg, command)
-
+        if target.name() == "rocm":
+            runner = backend.profiler_runner.Runner(
+                devices, self._attrs["name"], timeout=1800
+            )
+            op_type = self._attrs["op"]
+            all_op_names = list(self._attrs["op_instance"].keys())
+            for op_name in all_op_names:
+                x_shape = self._invert_exec_key(exec_key)
+                command = self._gen_profile_cmd(profiler_prefix, op_name, x_shape)
+                runner.push(op_name, command)
+        else:
+            profiler_filename = get_profiler_filename(self._attrs, "conv")
+            runner = backend.profiler_runner.Runner(
+                devices, self._attrs["name"], timeout=180
+            )
+            x_shape = self._invert_exec_key(exec_key)
+            command = self._gen_profile_cmd(profiler_prefix, profiler_filename, x_shape)
+            runner.push(profiler_filename, command)
         runner.join()
         result = runner.pull()
         if len(result) == 0:
             raise RuntimeError(
                 "Profile workload: " f"{exec_key}" " failed. " f"Results: {result}."
             )
-        out = min(result, key=lambda x: x[1].duration)
-        best_algo = out[0]
+        if target.name() == "rocm":
+            out = min(result, key=lambda x: x[1].duration)
+            best_algo = out[0]
+        else:
+            from operator import itemgetter
+
+            out = min(result, key=itemgetter(1))
+            best_algo = out[1].op_config
         workspace = out[1].workspace
         ## cache
         cache_record = ConvRecordEntry(
@@ -433,18 +562,23 @@ class conv2d(Operator):
             kh=self._attrs["KH"],
             kw=self._attrs["KW"],
             co=self._attrs["CO"],
-            stride=self._attrs["stride"],
-            pad=self._attrs["pad"],
-            dilate=self._attrs["dilate"],
             op_type=self._attrs["op"],
             epilogue=tmp_op.epilogue_functor.value,
             device=target._arch,
             algo=best_algo,
             workspace=workspace,
             split_k=split_k,  # todo add into profile
+            **self._get_params_factory(),
         )
         Target.current().insert_profile_cache("conv", cache_record.__dict__)
         return (best_algo, workspace)
+
+    def _has_dynamic_input_dims(self):
+        for input_tensor in self._attrs["inputs"]:
+            for dim in input_tensor._attrs["shape"]:
+                if not isinstance(dim, IntImm):
+                    return True
+        return False
 
     def profile(
         self,
@@ -456,17 +590,7 @@ class conv2d(Operator):
             devices = [0]
         self._profile_static(workdir, devices)
 
-        target = backend.target.Target.current()
-        if target.use_dummy_profiling_results():
-            return
-
-        has_dynamic = False
-        for input_tensor in self._attrs["inputs"]:
-            for dim in input_tensor._attrs["shape"]:
-                if not isinstance(dim, IntImm):
-                    has_dynamic = True
-                    break
-        if has_dynamic:
+        if self._has_dynamic_input_dims():
             if dynamic_profiling_strategy != DynamicProfileStrategy.HINTS:
                 raise NotImplementedError(
                     "conv2d only supports HINTS dynamic profiling strategy for now! Current strategy: {}".format(
@@ -480,37 +604,41 @@ class conv2d(Operator):
 
         workloads = list(self._attrs["exec_path"].keys())
         profiler_prefix = os.path.join(workdir, "profiler", self._attrs["op"])
+        target = backend.target.Target.current()
         if "op_instance" not in self._attrs:
-            target = backend.target.Target.current()
             # init candidate ops
             func_key = "{target}.{op}.config".format(
                 target=target.name(), op=self._attrs["op"]
             )
             func = registry.get(func_key)
-            func(self._attrs)
+            func(self._attrs, dtype=self._attrs["inputs"][0]._attrs["dtype"])
 
+        force_cache = environ.force_profiler_cache()
         for wkl in workloads:
-            logger.info(
-                __name__,
+            _LOGGER.info(
                 "Profile: {name}: {wkl}".format(name=self._attrs["name"], wkl=wkl),
             )
-            best_algo, workspace = self._profile_single_workload(
-                profiler_prefix, wkl, devices
-            )
-            self._attrs["exec_path"][wkl] = best_algo
-            self._attrs["workspace"] = max(self._attrs["workspace"], workspace)
+            # if in CI just choose minimal configs
+            # workspace is a hack just provides 102400 Byte
+            if target.use_dummy_profiling_results() and not force_cache:
+                algo = target.select_minimal_algo(
+                    list(self._attrs["op_instance"].keys())
+                )
+                _LOGGER.info(f"Select minimal algo {algo} for CI")
+                self._attrs["exec_path"][wkl] = algo
+                self._attrs["workspace"] = 102400
+            elif self._attrs["exec_path"][wkl] == "":
+                best_algo, workspace = self._profile_single_workload(
+                    profiler_prefix, wkl, devices, force_cache
+                )
+                self._attrs["exec_path"][wkl] = best_algo
+                self._attrs["workspace"] = max(self._attrs["workspace"], workspace)
 
     def _profile_dynamic_dim(self, workdir):
         """Profiles with dynamic shapes."""
 
-        profiler_prefix = os.path.join(workdir, "profiler", self._attrs["op"])
-        runner = backend.profiler_runner.Runner([0], self._attrs["name"])
         # extract dynamic dim from exec_path
-        if len(self._attrs["exec_path"]) <= 1:
-            return
-
         def _extract_dynamic_dim(exec_keys):
-            logger.info(__name__, "ONLY SUPPORT DYNAMIC BATCH (dim0)!")
             var_dims = [[], [], [], []]
             for key in exec_keys:
                 dims = self._invert_exec_key(key)
@@ -518,11 +646,41 @@ class conv2d(Operator):
                     var_dims[i].append(v)
             return var_dims
 
+        dim_lbs = self._attrs["dim_lower_bounds"]
         dims = _extract_dynamic_dim(self._attrs["exec_path"].keys())
-        dim1 = dims[1][0]
-        dim2 = dims[2][0]
+        dim0_lb = dim_lbs[0]
+        dim1_lb = dim_lbs[1]
+        dim2_lb = dim_lbs[2]
+        # dims' upper bounds are the same except the batch dimension
+        dim1_ub = dims[1][0]
+        dim2_ub = dims[2][0]
         dim3 = dims[3][0]
+
+        num_exec_path = len(self._attrs["exec_path"])
+        if num_exec_path < 1:
+            return
         algos = list(self._attrs["exec_path"].values())
+        if num_exec_path == 1 or len(set(algos)) <= 1:
+            # all exec paths point to the same algo
+            new_exec_paths = OrderedDict()
+            # Because we have a single algo, it's safe to just take the upper
+            # bound of dim0 (i.e. batch dim) values.
+            dim0_ub = max(dims[0])
+            # we need to generate new exec paths that ensure the ranges of
+            # likely dynamic heights and weights
+            new_key = self._gen_dyn_exec_key(
+                dim0_lb, dim0_ub, dim1_lb, dim1_ub, dim2_lb, dim2_ub, dim3
+            )
+            new_exec_paths[new_key] = algos[0]
+            self._attrs["exec_path"] = new_exec_paths
+            return
+
+        target = backend.target.Target.current()
+        if target.use_dummy_profiling_results():
+            return
+
+        profiler_prefix = os.path.join(workdir, "profiler", self._attrs["op"])
+        runner = backend.profiler_runner.Runner([0], self._attrs["name"])
         # generate region
         regions = []  # lb, ub, lb_algos, ub_algos
         for i in range(len(dims[0]) - 1):
@@ -539,34 +697,38 @@ class conv2d(Operator):
             last_mid = mid
             while mid > lb and mid < ub:
                 mid = (lb + ub) // 2
-                mid_shape = [mid, dim1, dim2, dim3]
-                logger.info(
-                    __name__,
+                mid_shape = [mid, dim1_ub, dim2_ub, dim3]
+                _LOGGER.info(
                     "current: lb_algo: {lb_algo}, LB:{lb} MID:{mid} UB:{ub}".format(
                         lb_algo=lb_algo, lb=lb, mid=mid, ub=ub
                     ),
                 )
 
-                mid_lb_algo_cmd = self._gen_profile_cmd(
-                    profiler_prefix, str(lb_algo), mid_shape
+                # run the profiler binary with all ops on the mid_shape
+                # and fetch the results only for the lb_algo and ub_algo
+                profiler_filename = get_profiler_filename(self._attrs, "conv")
+                profiler_cmd = self._gen_profile_cmd(
+                    profiler_prefix, profiler_filename, mid_shape
                 )
-                mid_ub_algo_cmd = self._gen_profile_cmd(
-                    profiler_prefix, str(ub_algo), mid_shape
+                runner.push(
+                    idx=profiler_filename,
+                    cmd=profiler_cmd,
+                    return_ops=[str(lb_algo), str(ub_algo)],
                 )
-                runner.push(0, mid_lb_algo_cmd)
-                runner.push(1, mid_ub_algo_cmd)
                 runner.join()
                 result = runner.pull()
-                assert len(result) >= 1
+                result_dict = {res.op_config: res for res in result[0][1]}
+
+                assert len(result_dict) >= 1
                 # if there is only one result, assume ub algo failed.
-                if len(result) == 1:
-                    assert result[0][0] == 0
+                if len(result_dict) == 1:
+                    assert str(ub_algo) not in result_dict
                     # last_lb = lb
                     lb = mid + 1
                 # if there are two result, compare to decide new lb/ub
                 else:
-                    lb_time = result[0][1]
-                    ub_time = result[1][1]
+                    lb_time = result_dict[str(lb_algo)].duration
+                    ub_time = result_dict[str(ub_algo)].duration
                     if lb_time < ub_time:
                         # lb algo can work with larger batch
                         # last_lb = lb
@@ -578,10 +740,10 @@ class conv2d(Operator):
                 last_mid = mid
                 mid = (lb + ub) // 2
             lo_region_key = self._gen_dyn_exec_key(
-                origin_lb, last_mid, dim1, dim2, dim3
+                origin_lb, last_mid, dim1_lb, dim1_ub, dim2_lb, dim2_ub, dim3
             )
             up_region_key = self._gen_dyn_exec_key(
-                last_mid, origin_ub, dim1, dim2, dim3
+                last_mid, origin_ub, dim1_lb, dim1_ub, dim2_lb, dim2_ub, dim3
             )
             new_exec_paths[lo_region_key] = lb_algo
             new_exec_paths[up_region_key] = ub_algo
@@ -596,15 +758,15 @@ class conv2d(Operator):
             #         runner.join()
             #         out = runner.pull()
             #         if len(out) == 0:
-            #             logger.info(self._attrs["name"], "Find specail case: batch=%d" % i)
+            #             _LOGGER.info("Find specail case: batch=%d" % i)
             #             algo = self._profile_single_workload(profiler_prefix, x_shape, [0])
             #             special_cases[self._gen_exec_key(x_shape)] = algo
 
-            # logger.info(self._attrs["name"],
+            # _LOGGER.info(
             #     "Searching for specail cases between [{lb}, {ub}]".format(lb=origin_lb,
             #         ub=last_mid))
             # _find_special_case(origin_lb, last_mid, lb_algo)
-            # logger.info(self._attrs["name"],
+            # _LOGGER.info(
             #     "Searching for specail cases between [{lb}, {ub}]".format(lb=last_mid + 1,
             #         ub=origin_ub))
             # _find_special_case(last_mid, origin_ub, ub_algo)

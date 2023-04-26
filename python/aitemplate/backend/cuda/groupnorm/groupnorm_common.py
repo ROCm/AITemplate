@@ -21,8 +21,8 @@ from typing import Any, Dict, List
 
 import jinja2
 
-from ...backend_spec import CUDASpec
-from ...target import Target
+from aitemplate.backend.backend_spec import CUDASpec
+from aitemplate.backend.target import Target
 
 FUNC_SIGNATURE = jinja2.Template(
     """
@@ -61,6 +61,7 @@ FUNC_TEMPLATE = jinja2.Template(
     """
 #include <cuda.h>
 #include <cuda_fp16.h>
+#include <cuda_bf16.h>
 #include <cuda_runtime.h>
 
 #include <cub/cub.cuh>
@@ -71,6 +72,8 @@ FUNC_TEMPLATE = jinja2.Template(
 #include <math_constants.h>
 #include <assert.h>
 
+using bfloat16 = __nv_bfloat16;
+using bfloat16_2 = __nv_bfloat162;
 
 {{gamma_beta_const_defs}}
 
@@ -85,7 +88,7 @@ namespace {
 {{func_signature}}
 {
 
-    return invokeGroupNorm_{{elem_input_type}}<{{FuseSwish}}, {{H}}, {{W}}, {{C}}, {{G}}>(
+    return invokeGroupNorm<{{elem_input_type}}, {{FuseSwish}}, {{H}}, {{W}}, {{C}}, {{G}}>(
             static_cast<{{elem_input_type}}*>(output),
             static_cast<{{elem_input_type}}*>(input),
             static_cast<{{elem_input_type}}*>(gamma),

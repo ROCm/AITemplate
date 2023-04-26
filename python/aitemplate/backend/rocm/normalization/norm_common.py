@@ -18,12 +18,13 @@ Normalization common codegen for ROCM.
 
 import os
 import re
+from collections import OrderedDict
 from hashlib import sha1
-from typing import Any, Dict, OrderedDict
+from typing import Any, Dict
 
 import jinja2
 
-from ...target import Target
+from aitemplate.backend.target import Target
 
 FUNC_CALL_PARAM_TEMPLATE = jinja2.Template("(void *)({{name}})")
 
@@ -340,7 +341,6 @@ def gen_profiler(
     op_instance = func_attrs["op_instance"]
     file_pairs = []
     for op_name, op in op_instance.items():
-
         config = emit_instance(op)
         config_name = extract_config_name(config)
         instances = INSTANCE_TEMPLATE.render(

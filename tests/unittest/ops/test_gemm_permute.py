@@ -19,21 +19,47 @@ import torch
 from aitemplate.compiler import compile_model, ops
 from aitemplate.frontend import Tensor
 from aitemplate.testing import detect_target
+from aitemplate.testing.test_utils import (
+    get_random_torch_tensor,
+    get_torch_empty_tensor,
+)
 from aitemplate.utils import shape_utils
 
 
 @unittest.skipIf(detect_target().name() == "rocm", "Not supported by ROCM.")
-class GEMMTestCase(unittest.TestCase):
-    def _test_rcr(self, ms, k, n, shape, test_name, has_bias=False, copy_op=False):
+@unittest.skipIf(
+    detect_target().name() == "cuda" and int(detect_target()._arch) < 80,
+    "Not supported by CUDA < SM80.",
+)
+class GEMMPermuteTestCase(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        torch.manual_seed(0)
+
+    def __init__(self, *args, **kwargs):
+        super(GEMMPermuteTestCase, self).__init__(*args, **kwargs)
+        self._test_id = 0
+
+    def _test_rcr(
+        self,
+        ms,
+        k,
+        n,
+        shape,
+        test_name,
+        has_bias=False,
+        copy_op=False,
+        dtype="float16",
+    ):
         target = detect_target()
         X = Tensor(
             shape=[shape_utils.gen_int_var_min_max(ms), k],
-            dtype="float16",
+            dtype=dtype,
             name="input_0",
             is_input=True,
         )
-        W = Tensor(shape=[n, k], dtype="float16", name="input_1", is_input=True)
-        B = Tensor(shape=[n], dtype="float16", name="input_2", is_input=True)
+        W = Tensor(shape=[n, k], dtype=dtype, name="input_1", is_input=True)
+        B = Tensor(shape=[n], dtype=dtype, name="input_2", is_input=True)
         if has_bias:
             OP = ops.gemm_rcr_bias_permute(shape)
             if copy_op:
@@ -46,12 +72,13 @@ class GEMMTestCase(unittest.TestCase):
             Y = OP(X, W)
         Y._attrs["name"] = "output_0"
         Y._attrs["is_output"] = True
-        module = compile_model(Y, target, "./tmp", f"gemm_rcr_{test_name}")
+        module = compile_model(Y, target, "./tmp", f"{test_name}_{self._test_id}")
+        self._test_id += 1
 
         for m in ms:
-            X_pt = torch.randn(m, k).cuda().half()
-            W_pt = torch.randn(n, k).cuda().half()
-            B_pt = torch.randn(n).cuda().half()
+            X_pt = get_random_torch_tensor([m, k], dtype)
+            W_pt = get_random_torch_tensor([n, k], dtype)
+            B_pt = get_random_torch_tensor([n], dtype)
             if has_bias:
                 Y_l = torch.nn.functional.linear(X_pt, W_pt, B_pt)
             else:
@@ -62,7 +89,7 @@ class GEMMTestCase(unittest.TestCase):
             inputs = {"input_0": X_pt, "input_1": W_pt}
             if has_bias:
                 inputs["input_2"] = B_pt
-            y = torch.empty(Y_pt.shape).cuda().half()
+            y = get_torch_empty_tensor(Y_pt.shape, dtype)
             module.run_with_tensors(inputs, [y])
             self.assertTrue(torch.allclose(Y_pt, y, atol=1e-1, rtol=1e-1))
 
@@ -74,7 +101,7 @@ class GEMMTestCase(unittest.TestCase):
                     32,
                     96,
                     (5, 3, 2),
-                    "permute1",
+                    f"test_rcr_float16_{has_bias}_{copy_op}_1",
                     has_bias=has_bias,
                     copy_op=copy_op,
                 )
@@ -83,23 +110,32 @@ class GEMMTestCase(unittest.TestCase):
                     64,
                     256,
                     (8, 4, 4),
-                    "permute2",
+                    f"test_rcr_float16_{has_bias}_{copy_op}_2",
                     has_bias=has_bias,
                     copy_op=copy_op,
                 )
 
     def _test_rcr_0213(
-        self, ms, k, n, shape, test_name, has_bias=False, copy_op=False, layout="0213"
+        self,
+        ms,
+        k,
+        n,
+        shape,
+        test_name,
+        has_bias=False,
+        copy_op=False,
+        layout="0213",
+        dtype="float16",
     ):
         target = detect_target()
         X = Tensor(
             shape=[shape_utils.gen_int_var_min_max(ms), k],
-            dtype="float16",
+            dtype=dtype,
             name="input_0",
             is_input=True,
         )
-        W = Tensor(shape=[n, k], dtype="float16", name="input_1", is_input=True)
-        B = Tensor(shape=[n], dtype="float16", name="input_2", is_input=True)
+        W = Tensor(shape=[n, k], dtype=dtype, name="input_1", is_input=True)
+        B = Tensor(shape=[n], dtype=dtype, name="input_2", is_input=True)
         if has_bias:
             OP = ops.gemm_rcr_bias_permute(shape, layout)
             if copy_op:
@@ -112,12 +148,13 @@ class GEMMTestCase(unittest.TestCase):
             Y = OP(X, W)
         Y._attrs["name"] = "output_0"
         Y._attrs["is_output"] = True
-        module = compile_model(Y, target, "./tmp", f"gemm_rcr_{test_name}")
+        module = compile_model(Y, target, "./tmp", f"{test_name}_{self._test_id}")
+        self._test_id += 1
 
         for m in ms:
-            X_pt = torch.randn(m, k).cuda().half()
-            W_pt = torch.randn(n, k).cuda().half()
-            B_pt = torch.randn(n).cuda().half()
+            X_pt = get_random_torch_tensor([m, k], dtype)
+            W_pt = get_random_torch_tensor([n, k], dtype)
+            B_pt = get_random_torch_tensor([n], dtype)
 
             def torch_f(x, w, b, has_bias, shape):
                 if has_bias:
@@ -135,7 +172,7 @@ class GEMMTestCase(unittest.TestCase):
             inputs = {"input_0": X_pt, "input_1": W_pt}
             if has_bias:
                 inputs["input_2"] = B_pt
-            y = torch.empty(Y_pt.shape).cuda().half()
+            y = get_torch_empty_tensor(Y_pt.shape, dtype)
             module.run_with_tensors(inputs, [y])
             self.assertTrue(torch.allclose(Y_pt, y, atol=1e-1, rtol=1e-1))
 
@@ -153,7 +190,7 @@ class GEMMTestCase(unittest.TestCase):
             256,
             4000000,
             [54, 1000000],
-            "permute_0213_1",
+            "test_rcr_0213_float16_1",
             has_bias=False,
             copy_op=False,
             layout="0213",
@@ -163,44 +200,133 @@ class GEMMTestCase(unittest.TestCase):
             256,
             300000,
             [29, 100000],
-            "permute_0213_2",
+            "test_rcr_0213_float16_2",
             has_bias=False,
             copy_op=False,
             layout="0213",
         )
 
-    def _test_rrr(self, ms, k, n, shape, test_name, copy_op=False):
+    def _test_rrr(
+        self,
+        ms,
+        k,
+        n,
+        shape,
+        test_name,
+        copy_op=False,
+        dtype="float16",
+    ):
         target = detect_target()
         X = Tensor(
             shape=[shape_utils.gen_int_var_min_max(ms), k],
-            dtype="float16",
+            dtype=dtype,
             name="input_0",
             is_input=True,
         )
-        W = Tensor(shape=[k, n], dtype="float16", name="input_1", is_input=True)
+        W = Tensor(shape=[k, n], dtype=dtype, name="input_1", is_input=True)
         OP = ops.gemm_rrr_permute(shape)
         if copy_op:
             OP = ops.gemm_rrr_permute(**OP._get_op_attributes())
         Y = OP(X, W)
         Y._attrs["name"] = "output_0"
         Y._attrs["is_output"] = True
-        module = compile_model(Y, target, "./tmp", "gemm_rrr_{}".format(test_name))
+        module = compile_model(Y, target, "./tmp", f"{test_name}_{self._test_id}")
+        self._test_id += 1
 
         for m in ms:
-            X_pt = torch.randn(m, k).cuda().half()
-            W_pt = torch.randn(k, n).cuda().half()
+            X_pt = get_random_torch_tensor([m, k], dtype)
+            W_pt = get_random_torch_tensor([k, n], dtype)
             Y_l = torch.matmul(X_pt, W_pt)
             Y_r = Y_l.reshape(16, *shape, 16)
             Y_pt = torch.permute(Y_r, [2, 0, 3, 1, 4])
             inputs = {"input_0": X_pt, "input_1": W_pt}
-            y = torch.empty(Y_pt.shape).cuda().half()
+            y = get_torch_empty_tensor(Y_pt.shape, dtype)
             module.run_with_tensors(inputs, [y])
             self.assertTrue(torch.allclose(Y_pt, y, atol=1e-1, rtol=1e-1))
 
     def test_rrr(self):
-        self._test_rrr([80], 32, 96, (5, 3, 2), "permute1")
-        self._test_rrr([128], 64, 256, (8, 4, 4), "permute2")
-        self._test_rrr([128], 64, 256, (8, 4, 4), "permute2_copy_op", copy_op=True)
+        self._test_rrr(
+            [80],
+            32,
+            96,
+            (5, 3, 2),
+            "test_rrr_float16_1",
+        )
+        self._test_rrr(
+            [128],
+            64,
+            256,
+            (8, 4, 4),
+            "test_rrr_float16_2",
+        )
+        self._test_rrr(
+            [128],
+            64,
+            256,
+            (8, 4, 4),
+            "test_rrr_float16_2_copy_op",
+            copy_op=True,
+        )
+
+    def test_permute_float32(self):
+        for has_bias in (True, False):
+            self._test_rcr(
+                [80],
+                32,
+                96,
+                (5, 3, 2),
+                f"test_rcr_float32_{has_bias}",
+                has_bias=has_bias,
+                dtype="float32",
+            )
+        self._test_rcr_0213(
+            [29, 29 * 8],
+            256,
+            300000,
+            [29, 100000],
+            "test_rcr_0213_float32",
+            has_bias=False,
+            layout="0213",
+            dtype="float32",
+        )
+        self._test_rrr(
+            [128],
+            64,
+            256,
+            (8, 4, 4),
+            "test_rrr_float32",
+            dtype="float32",
+        )
+
+    def test_gemm_permute_bfloat16(self):
+        for has_bias in (True, False):
+            self._test_rcr(
+                [80],
+                32,
+                96,
+                (5, 3, 2),
+                f"test_rcr_bfloat16_{has_bias}",
+                has_bias=has_bias,
+                dtype="bfloat16",
+            )
+        self._test_rcr_0213(
+            [29, 29 * 8],
+            256,
+            300000,
+            [29, 100000],
+            "test_rcr_0213_bfloat16",
+            has_bias=False,
+            layout="0213",
+            dtype="bfloat16",
+        )
+        self._test_rrr(
+            [128],
+            64,
+            256,
+            (8, 4, 4),
+            "test_rrr_bfloat16",
+            dtype="bfloat16",
+        )
 
 
 if __name__ == "__main__":

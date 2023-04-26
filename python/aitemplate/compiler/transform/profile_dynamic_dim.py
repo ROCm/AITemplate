@@ -15,29 +15,31 @@
 """
 Graph pass to invoke profiling with dynamic shapes.
 """
+import logging
+from collections import OrderedDict
 from copy import deepcopy
-from typing import List, OrderedDict
+from typing import List
 
-from ...backend import builder, codegen
-from ...utils import logger
-from ..base import Tensor
+from aitemplate.backend import builder, codegen
+from aitemplate.compiler.base import Tensor
 
 # pylint: disable=C0103,W0613,W0102
 
 
+_LOGGER = logging.getLogger(__name__)
+
+
 def profile_dynamic_dim(sorted_graph: List[Tensor], workdir="./tmp"):
-    logger.info(__name__, "Current dynamic profiler supports ONLY ONE dynamic dim.")
+    _LOGGER.info("Current dynamic profiler supports ONLY ONE dynamic dim.")
     generated_profilers = list(codegen.gen_profiler(sorted_graph, workdir))
     generated_profilers = [p for p in generated_profilers if p is not None]
     compile_engine = builder.Builder()
     compile_engine.make_profilers(generated_profilers, workdir)
     funcs_to_profile = OrderedDict(
-        {
-            func._attrs["name"]: func
-            for node in sorted_graph
-            for func in node.src_ops()
-            if func._attrs["has_profiler"]
-        }
+        (func._attrs["name"], func)
+        for node in sorted_graph
+        for func in node.src_ops()
+        if func._attrs["has_profiler"]
     )
     for f in funcs_to_profile.values():
         f.profile_dynamic_dim(

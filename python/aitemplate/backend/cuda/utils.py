@@ -15,15 +15,19 @@
 """
 Util functions for CUDA codegen.
 """
-from aitemplate.utils.mk_cutlass_lib.mk_cutlass_lib import mk_cutlass_lib
+import logging
 
-from ...utils import logger
-from .. import registry
+from aitemplate.backend import registry
+
+from aitemplate.utils.mk_cutlass_lib.mk_cutlass_lib import mk_cutlass_lib
 
 # pylint: disable=C0103,C0415,W0707
 
 
-class Args(object):
+_LOGGER = logging.getLogger(__name__)
+
+
+class Args:
     def __init__(self, arch):
         self.operations = "all"
         self.build_dir = ""
@@ -37,6 +41,7 @@ class Args(object):
         self.selected_kernel_list = None
         self.interface_dir = None
         self.filter_by_cc = True
+        self.disable_full_archs_compilation = False
 
 
 registry.reg("cuda.make_cutlass_lib")(mk_cutlass_lib)
@@ -59,5 +64,5 @@ def gen_ops(arch):
         func = getattr(cutlass_lib.extra_operation, "GenerateSM" + arch)
         func(manifest, args)
     except AttributeError:
-        logger.warning(__file__, "Arch " + arch + " is not supported by extra ops.")
+        _LOGGER.warning("Arch " + arch + " is not supported by extra ops.")
     return manifest.operations

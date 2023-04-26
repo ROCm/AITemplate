@@ -15,10 +15,14 @@
 """
 CUDA target specialization
 """
+import errno
+import hashlib
 import json
+import logging
 import os
 import pipes
 import re
+import secrets
 import shutil
 import sys
 import tempfile
@@ -26,16 +30,28 @@ import tempfile
 from pathlib import Path
 from typing import List
 
+from aitemplate.backend import registry
+
 from aitemplate.backend.profiler_cache import ProfileCacheDB
 
-from aitemplate.backend.target import TargetType
+from aitemplate.backend.target import (
+    AIT_STATIC_FILES_PATH,
+    CUTLASS_PATH,
+    Target,
+    TargetType,
+)
 
-from ...utils import logger
+from aitemplate.utils import environ
+from aitemplate.utils.io import copytree_with_hash
+from aitemplate.utils.misc import is_debug, is_linux
 
-from .. import registry
-from ..target import AIT_STATIC_FILES_PATH, CUTLASS_PATH, Target
 
 # pylint: disable=C0415,W0707,W0611,W0702,W1401
+
+
+_LOGGER = logging.getLogger(__name__)
+
+_NUM_DIR_CREATE_ATTEMPTS = 20
 
 
 class CUDA(Target):
@@ -87,8 +103,8 @@ class CUDA(Target):
             os.path.join(self._template_path, "include"),
             os.path.join(self._template_path, "tools/util/include"),
             os.path.join(self._template_path, "examples/35_gemm_softmax"),
-            os.path.join(self._template_path, "examples/42_fused_multi_head_attention"),
-            os.path.join(self._template_path, "examples/43_dual_gemm"),
+            os.path.join(self._template_path, "examples/41_fused_multi_head_attention"),
+            os.path.join(self._template_path, "examples/45_dual_gemm"),
             os.path.join(
                 flash_attention_path,
                 "./",
@@ -97,30 +113,23 @@ class CUDA(Target):
                 flash_attention_path,
                 "fmha",
             ),
-            os.path.join(self._template_path, "../cub"),
         ]
+        ait_static_path = os.path.join(self._ait_include_path, "include/kernels")
         options = [
             "-DCUTLASS_ENABLE_TENSOR_CORE_MMA=1",
             "-DCUTLASS_USE_TANH_FOR_SIGMOID=1",
             "-w",
-            "-gencode=arch=compute_%s,code=[sm_%s,compute_%s]"
-            % (self._arch, self._arch, self._arch),
+            f"-gencode=arch=compute_{self._arch},code=[sm_{self._arch},compute_{self._arch}]",
             "-Xcompiler=-fPIC",
             "-Xcompiler=-Wconversion",
             "-Xcompiler=-fno-strict-aliasing",
             "-Xcompiler -fvisibility=hidden",
-            "-O3",
+            environ.get_compiler_opt_level(),
             "-std=c++17",
             "--expt-relaxed-constexpr",
             "--use_fast_math",
-            "-I" + cutlass_path[0],
-            "-I" + cutlass_path[1],
-            "-I" + cutlass_path[2],
-            "-I" + cutlass_path[3],
-            "-I" + cutlass_path[4],
-            "-I" + cutlass_path[5],
-            "-I" + cutlass_path[6],
-        ]
+            f"-I{ait_static_path}",
+        ] + ["-I" + path for path in cutlass_path]
         if self._ndebug == 1:
             options.append("-DNDEBUG")
         return " ".join(options)
@@ -151,11 +160,7 @@ class CUDA(Target):
 
     def __exit__(self, ptype, value, trace):
         super().__exit__(ptype, value, trace)
-        if (
-            self.lib_folder
-            and os.path.exists(self.lib_folder)
-            and not logger.is_debug()
-        ):
+        if self.lib_folder and os.path.exists(self.lib_folder) and not is_debug():
             shutil.rmtree(self.lib_folder)
 
     def cc(self):
@@ -188,9 +193,14 @@ class CUDA(Target):
 class FBCUDA(CUDA):
     """FBCUDA target. Used in Meta internal env only."""
 
+    # @TODO: instead of using multiple class properties
+    # which can go out of sync, we should refactor this
+    # to use a proper singleton instance that can be returned by detect_target
+
     nvcc_option_json = None
     cutlass_path_ = None
     compile_options_ = None
+    include_path_ = None
 
     def __init__(self, arch="80", remote_cache_bytes=None, **kwargs):
         from libfb.py import parutil
@@ -201,20 +211,109 @@ class FBCUDA(CUDA):
         cub_src_path = parutil.get_dir_path("aitemplate/AITemplate/fb/3rdparty/cub")
         static_files_path = parutil.get_dir_path("aitemplate/AITemplate/static")
         self._include_path = None
-        if not FBCUDA.cutlass_path_:
-            self._include_path = tempfile.mkdtemp()
+        try:
+            self.tmp_path = os.path.join(
+                tempfile.gettempdir(), f"{os.getuid()}_aitemplate_tmp"
+            )
+        except OSError:
+            _LOGGER.warning(
+                "FBCUDA Target: Failed to create user-specific temp directory path."
+            )
+            self.tmp_path = self.tmp_path = os.path.join(
+                tempfile.gettempdir(), f"{secrets.token_hex(16)}_aitemplate_tmp"
+            )
+        if FBCUDA.cutlass_path_ is None:
+            FBCUDA.compile_options_ = None  # If we rebuild the cutlass path
+            # we also need to rebuild the compile options
+            # Copy all of the includes over into an include directory
 
-            FBCUDA.cutlass_path_ = self._include_path + "/cutlass"
-            self.cub_path_ = self._include_path + "/cub"
-            shutil.copytree(cutlass_src_path, FBCUDA.cutlass_path_)
-            shutil.copytree(cub_src_path, self.cub_path_)
+            os.makedirs(self.tmp_path, exist_ok=True)
+            # find an unused random temporary directory within our base tmp_path
+            random_key = secrets.token_hex(16)
+            errcount = 0
+            while True:
+                try:
+                    os.makedirs(os.path.join(self.tmp_path, random_key), exist_ok=False)
+                    break
+                except OSError as error:
+                    errcount += 1
+                    if errcount > _NUM_DIR_CREATE_ATTEMPTS:
+                        raise OSError(
+                            f"Failed to create user-specific temp directory path below {self.tmp_path}. Giving up."
+                        ) from error
+                    if error.errno != errno.EEXIST:
+                        raise
+                    else:
+                        random_key = secrets.token_hex(16)
 
+            # the random_key part of this path will later be renamed to the content hash
+            _tmp_include_path = os.path.join(
+                self.tmp_path,
+                random_key,
+                "includes",
+            )
+            includes_content_hash = hashlib.sha256()
+            _tmp_cutlass_path_ = os.path.join(_tmp_include_path, "cutlass")
+            _tmp_cub_path_ = os.path.join(_tmp_include_path, "cub")
+            # copy recursively, and update a content hash in one go
+            copytree_with_hash(
+                cutlass_src_path, _tmp_cutlass_path_, hash=includes_content_hash
+            )
+            copytree_with_hash(cub_src_path, _tmp_cub_path_, hash=includes_content_hash)
             attention_src_path = parutil.get_dir_path(
                 "aitemplate/AITemplate/python/aitemplate/backend/cuda/attention/src"
             )
-            attention_include_path = self._include_path + "/att_include"
-            shutil.copytree(attention_src_path, attention_include_path)
+            attention_include_path = os.path.join(_tmp_include_path, "att_include")
+            copytree_with_hash(
+                attention_src_path, attention_include_path, hash=includes_content_hash
+            )
+            ait_static_include_path = os.path.join(_tmp_include_path, "static")
+            copytree_with_hash(
+                static_files_path + "/include/kernels",
+                ait_static_include_path,
+                hash=includes_content_hash,
+            )
+            # Now we have a content hash over all include contents
+            include_hash_digest = includes_content_hash.hexdigest()
+            # Prepare to rename atomically
+            old_path = os.path.join(self.tmp_path, random_key)
+            new_path = os.path.join(
+                self.tmp_path,
+                include_hash_digest,
+            )
+            # if it already exists, we don't want to overwrite it
+            # we can just delete our copy.
+            try:
+                if os.path.exists(new_path):
+                    # new version should replace old version. But this replacement
+                    # should happen ideally atomically. renames are much faster than
+                    # a recursive delete.
+                    os.rename(new_path, old_path + ".bak")
+                os.rename(old_path, new_path)
+            except OSError as e:
+                # target directory with identical contents already exists
+                _LOGGER.error(
+                    f"FBCUDA: Rename of old {old_path} to {new_path} failed.",
+                    exc_info=e,
+                )
+            try:
+                if os.path.exists(old_path):
+                    shutil.rmtree(old_path)
+            except OSError:
+                pass
+            try:
+                if os.path.exists(old_path + ".bak"):
+                    shutil.rmtree(old_path + ".bak")
+            except OSError:
+                pass
+            # set the include paths to the final variant
+            self._include_path = os.path.join(new_path, "includes")
+            self.cub_path_ = os.path.join(self._include_path, "cub")
+            FBCUDA.include_path_ = self._include_path
+            FBCUDA.cutlass_path_ = os.path.join(self._include_path, "cutlass")
+
         self.cutlass_path_ = FBCUDA.cutlass_path_
+        self._include_path = FBCUDA.include_path_
 
         cutlass_lib_path = parutil.get_dir_path(
             "aitemplate/AITemplate/python/aitemplate/utils/mk_cutlass_lib"
@@ -223,11 +322,9 @@ class FBCUDA(CUDA):
 
         if not FBCUDA.nvcc_option_json:
             convert_nvcc_json = parutil.get_file_path(
-                os.path.join("aitemplate/testing", "convert_nvcc_cmd")
+                os.path.join("aitemplate", "testing", "convert_nvcc_cmd")
             )
-            logger.info(
-                __name__, f"Load the nvcc compile option from {convert_nvcc_json}"
-            )
+            _LOGGER.info(f"Load the nvcc compile option from {convert_nvcc_json}")
             with open(convert_nvcc_json, "r") as nvcc_option_json:
                 FBCUDA.nvcc_option_json = json.load(nvcc_option_json)
         self.nvcc_options_json = FBCUDA.nvcc_option_json
@@ -236,69 +333,78 @@ class FBCUDA(CUDA):
         super().__init__(self.cutlass_path_, static_files_path, arch, **kwargs)
 
     def _build_compile_options(self):
-        if not FBCUDA.compile_options_:
+        if FBCUDA.compile_options_ is None:
+            assert self._template_path is not None
+            assert self._include_path is not None
+            assert self.cutlass_path_ is not None
             cutlass_path = [
                 os.path.join(self._template_path, "include"),
                 os.path.join(self._template_path, "tools/util/include"),
                 os.path.join(self._template_path, "examples/35_gemm_softmax"),
                 os.path.join(
-                    self._template_path, "examples/42_fused_multi_head_attention"
+                    self._template_path, "examples/41_fused_multi_head_attention"
                 ),
-                os.path.join(self._template_path, "examples/43_dual_gemm"),
+                os.path.join(self._template_path, "examples/45_dual_gemm"),
                 os.path.join(self._template_path, "../att_include"),
                 os.path.join(self._template_path, "../att_include/fmha"),
-                os.path.join(self._template_path, "../cub"),
             ]
+            ait_static_path = os.path.join(self._include_path, "static")
             fb_include_path = os.path.join(self._include_path, "fb_include")
             pp_args = self.nvcc_options_json["pp_args"]
             with open(fb_include_path, "w") as fb_include:
                 for arg in pp_args:
                     fb_include.write(pipes.quote(arg) + "\n")
-            options = self.nvcc_options_json["args"] + [
-                "-I" + cutlass_path[0],
-                "-I" + cutlass_path[1],
-                "-I" + cutlass_path[2],
-                "-I" + cutlass_path[3],
-                "-I" + cutlass_path[4],
-                "-I" + cutlass_path[5],
-                "-I" + cutlass_path[6],
-                f"-Xcompiler '-Wp\,@{fb_include_path}'",  # noqa: W605
-                "-Xcompiler -Wno-strict-aliasing",
-                "-Xcompiler -Wno-narrowing",
-                "-Xcompiler -Wno-error=maybe-uninitialized",
-                "-Xcompiler -Wno-uninitialized",
-                "-Xcompiler -Wno-error=array-bounds",
-                "-Xcompiler -fPIC",
-                "-Xcompiler -fvisibility=hidden",
-                "-DCUTLASS_ENABLE_TENSOR_CORE_MMA=1",
-                "-DCUTLASS_USE_TANH_FOR_SIGMOID=1",
-                "-w",
-                "--expt-relaxed-constexpr",
-                "--use_fast_math",
-                "-gencode=arch=compute_%s,code=[sm_%s,compute_%s]"
-                % (self._arch, self._arch, self._arch),
-                "-Xcompiler=-Wconversion",
-                "-O3",
-                "-std=c++17",
-            ]
+
+            options = (
+                self.nvcc_options_json["args"]
+                + ["-I" + path for path in cutlass_path]
+                + [
+                    f"-I{ait_static_path}",
+                    f"-Xcompiler '-Wp\,@{fb_include_path}'",  # noqa: W605
+                    "-Xcompiler -Wno-strict-aliasing",
+                    "-Xcompiler -Wno-narrowing",
+                    "-Xcompiler -Wno-error=maybe-uninitialized",
+                    "-Xcompiler -Wno-uninitialized",
+                    "-Xcompiler -Wno-error=array-bounds",
+                    "-Xcompiler -fPIC",
+                    "-Xcompiler -fvisibility=hidden",
+                    "-DCUTLASS_ENABLE_TENSOR_CORE_MMA=1",
+                    "-DCUTLASS_USE_TANH_FOR_SIGMOID=1",
+                    "-w",
+                    "--expt-relaxed-constexpr",
+                    "--use_fast_math",
+                    f"-gencode=arch=compute_{self._arch},code=[sm_{self._arch},compute_{self._arch}]",
+                    "-Xcompiler=-Wconversion",
+                    environ.get_compiler_opt_level(),
+                    "-std=c++17",
+                ]
+            )
             if self._ndebug == 1:
                 options.append("-DNDEBUG")
             FBCUDA.compile_options_ = " ".join(options)
         compile_options = FBCUDA.compile_options_
-        logger.debug(__name__, f"The compile options are: {compile_options}")
+        assert compile_options is not None
+        _LOGGER.info(f"The compile options are: {compile_options}")
         return compile_options
 
     def __exit__(self, ptype, value, trace):
         super().__exit__(ptype, value, trace)
-        if not logger.is_debug() and self._include_path:
-            shutil.rmtree(self._include_path)
 
     def binary_compile_cmd(self):
         """
         There is no ld by default in the prod env. Instead, we use ld from the gvfs path.
         """
         ld = self.nvcc_options_json["ld"]
-        return " ".join([ld, "-r -b binary -o {target} {src}"])
+        objcopy = self.nvcc_options_json["objcopy"]
+        cmd = " ".join([ld, "-r -b binary -o {target} {src}"])
+        # Support models with >2GB constants on Linux only
+        if is_linux():
+            cmd += (
+                f" && {objcopy} --rename-section"
+                " .data=.lrodata,alloc,load,readonly,data,contents"
+                " {target} {target}"
+            )
+        return cmd
 
     def cc(self):
         return self.nvcc_options_json["nvcc_bin"]
@@ -328,7 +434,7 @@ class FBCUDA(CUDA):
             res = f.read()
             return res
 
-    def in_ci_env(self):
+    def in_ci_env(self) -> bool:
         return (
             os.environ.get("INSIDE_RE_WORKER", None) == "1" and not self.trick_ci_env()
         )
@@ -347,7 +453,7 @@ class FBCUDA(CUDA):
             try:
                 AITemplateRemoteLogger.log(record)
             except Exception as e:
-                logger.info(__name__, f"remote_logger failed: {e}")
+                _LOGGER.info(f"remote_logger failed: {e}")
 
     def _load_profile_cache(self):
         """Load local profile cache for this target."""
@@ -356,13 +462,12 @@ class FBCUDA(CUDA):
             return
 
         if self.remote_cache_bytes is not None:
-            logger.info(
-                __name__,
+            _LOGGER.info(
                 f"Loading profile cache from provided cache content with length {len(self.remote_cache_bytes)}",
             )
             with open(cache_path, "wb") as f:
                 f.write(self.remote_cache_bytes)
-        logger.info(__name__, f"Loading profile cache from: {cache_path}")
+        _LOGGER.info(f"Loading profile cache from: {cache_path}")
         self._profile_cache = ProfileCacheDB(
             TargetType(self._target_type).name, path=cache_path
         )

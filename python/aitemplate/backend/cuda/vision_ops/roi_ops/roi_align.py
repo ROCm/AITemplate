@@ -18,9 +18,9 @@ Codegen functions for roi_align.
 
 import jinja2
 
-from .... import registry
-from ....backend_spec import CUDASpec
-from ....common.vision_ops import roi_align_common
+from aitemplate.backend import registry
+from aitemplate.backend.backend_spec import CUDASpec
+from aitemplate.backend.common.vision_ops import roi_align_common
 
 # pylint: disable=C0103,C0415,W0613,C0301,W0612
 
@@ -37,7 +37,7 @@ EXTRA_HEADER = jinja2.Template(
 def gen_function(
     func_attrs,
     template_path,
-    exec_cond_remplate,
+    exec_cond_template,
     shape_eval_template,
     shape_save_template,
 ):
@@ -46,7 +46,7 @@ def gen_function(
 
     x = func_attrs["inputs"][0]
     backend_spec = CUDASpec()
-    library_dtype = backend_spec.dtype_to_lib_type(x._attrs["dtype"])
+    dtype = backend_spec.dtype_to_backend_type(x._attrs["dtype"])
     half2_data_ref = backend_spec.half2_data_ref
 
     shape_eval_func = shape_eval_template.render(
@@ -78,9 +78,9 @@ def gen_function(
             spatial_scale=func_attrs["spatial_scale"],
             position_sensitive=func_attrs["position_sensitive"],
             continuous_coordinate=func_attrs["continuous_coordinate"],
-            library_dtype=library_dtype,
+            dtype=dtype,
         )
-        exec_inst = exec_cond_remplate.render(indent="  ", cond=key, program=program)
+        exec_inst = exec_cond_template.render(indent="  ", cond=key, program=program)
         exec_paths += exec_inst
     return roi_align_common.SRC_TEMPLATE.render(
         function_name=func_name,
@@ -90,6 +90,7 @@ def gen_function(
         header_files=EXTRA_HEADER.render(),
         index_type=backend_spec.index_type,
         half2_data_ref=half2_data_ref,
+        dtype=dtype,
     )
 
 

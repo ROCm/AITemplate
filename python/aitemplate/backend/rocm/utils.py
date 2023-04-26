@@ -21,14 +21,14 @@ import re
 import shutil
 import tempfile
 
-from .. import registry
+from aitemplate.backend import registry
 
 # from . import extra_conv_emit, extra_cutlass_generator, extra_enum
 
 # pylint: disable=C0103,C0415,W0707
 
 
-class Args(object):
+class Args:
     def __init__(self, arch):
         self.operations = "all"
         self.build_dir = ""

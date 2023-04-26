@@ -15,7 +15,7 @@
 #ifndef GROUPNORM_KERNEL_CUH
 #define GROUPNORM_KERNEL_CUH
 
-#define FINAL_MASK 0xffffffff
+constexpr uint32_t kFinalMask = 0xffffffff;
 
 #ifndef GROUP_NORM_CUDA_CHECK
 #define GROUP_NORM_CUDA_CHECK(expr)                                       \
@@ -33,29 +33,105 @@
 #define GROUP_NORM_CUDA_CHECK_LAUNCH() GROUP_NORM_CUDA_CHECK(cudaGetLastError())
 #endif
 
+#ifndef __HALF_TO_US
+#define __HALF_TO_US(var) *(reinterpret_cast<unsigned short*>(&(var)))
+#endif
+
+#define NOT_IMPLEMENTED() assert(0 && __PRETTY_FUNCTION__)
+
 __device__ half fast_tanh(half x) {
+#if defined(__CUDA_ARCH__) && (__CUDACC_VER_MAJOR__ >= 11) && \
+    (__CUDA_ARCH__ >= 750)
+
+  asm volatile("tanh.approx.f16 %0, %1;"
+               : "=h"(__HALF_TO_US(x))
+               : "h"(__HALF_TO_US(x)));
+  return x;
+
+#else
   return half(cutlass::fast_tanh(float(x)));
+#endif
 }
 
-__inline__ __device__ float sigmoid(float val) {
-  return (cutlass::fast_tanh(val * 0.5f) + 1.0f) * 0.5f;
+__device__ bfloat16 fast_tanh(bfloat16 x) {
+#if defined(__CUDA_ARCH__) && (__CUDACC_VER_MAJOR__ >= 11) && \
+    (__CUDA_ARCH__ >= 900)
+  asm volatile("tanh.approx.bf16 %0, %1;"
+               : "=h"(__HALF_TO_US(x))
+               : "h"(__HALF_TO_US(x)));
+  return x;
+
+#elif defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 800)
+  return cutlass::fast_tanh(float(x));
+#else
+  NOT_IMPLEMENTED();
+#endif
 }
 
-__device__ half constant_half() {
-  uint16_t bits = 0x3800u;
-  return reinterpret_cast<half const&>(bits);
+#define CUDA_FP16_ONE_HALF \
+  __half_raw {             \
+    0x3800u                \
+  }
+#define CUDA_FP16_ONE \
+  __half_raw {        \
+    0x3c00u           \
+  }
+#define CUDA_BF16_ONE_HALF \
+  __nv_bfloat16_raw {      \
+    0x3f00u                \
+  }
+#define CUDA_BF16_ONE \
+  __nv_bfloat16_raw { \
+    0x3f80u           \
+  }
+
+__device__ float sigmoid(const float a) {
+  return (cutlass::fast_tanh(a * 0.5f) + 1.0f) * 0.5f;
 }
 
-__device__ half one() {
-  uint16_t bits = 0x3c00u;
-  return reinterpret_cast<half const&>(bits);
+__device__ half hsigmoid(const half a) {
+  return __hmul(
+      (__hadd(fast_tanh(__hmul(a, CUDA_FP16_ONE_HALF)), CUDA_FP16_ONE)),
+      CUDA_FP16_ONE_HALF);
 }
 
-__inline__ __device__ half hsigmoid(half a) {
-  half half_val = constant_half();
-  half one_val = one();
-  return __hmul((__hadd(fast_tanh(__hmul(a, half_val)), one_val)), half_val);
+#if defined(__CUDA_ARCH__) && (__CUDACC_VER_MAJOR__ >= 11) && \
+    (__CUDA_ARCH__ >= 800)
+__device__ bfloat16 bf16sigmoid(const bfloat16 a) {
+  return __hmul(
+      (__hadd(fast_tanh(__hmul(a, CUDA_BF16_ONE_HALF)), CUDA_BF16_ONE)),
+      CUDA_BF16_ONE_HALF);
 }
+#endif
+
+template <typename T>
+struct FSigmoid {
+  __inline__ __device__ T operator()(const T input) const;
+};
+
+template <>
+struct FSigmoid<half> {
+  __inline__ __device__ half operator()(const half a) const {
+    return hsigmoid(a);
+  }
+};
+
+#if defined(__CUDA_ARCH__) && (__CUDACC_VER_MAJOR__ >= 11) && \
+    (__CUDA_ARCH__ >= 800)
+template <>
+struct FSigmoid<bfloat16> {
+  __inline__ __device__ bfloat16 operator()(const bfloat16 a) const {
+    return bf16sigmoid(a);
+  }
+};
+#endif
+
+template <>
+struct FSigmoid<float> {
+  __inline__ __device__ float operator()(const float a) const {
+    return sigmoid(a);
+  }
+};
 
 ////////////////////////////////////////////////////////////////////////////////
 // The Groupnorm implementation below is based on OneFlow's Layernorm
@@ -110,11 +186,19 @@ __forceinline__ __device__ half Rsqrt<half>(half x) {
   return hrsqrt(x);
 }
 
+#if defined(__CUDA_ARCH__) && (__CUDACC_VER_MAJOR__ >= 11) && \
+    (__CUDA_ARCH__ >= 800)
+template <>
+__forceinline__ __device__ bfloat16 Rsqrt<bfloat16>(bfloat16 x) {
+  return hrsqrt(x);
+}
+#endif
+
 #undef __AIT_GN_USE_FAST_MATH
 
 template <typename T>
 inline __device__ void WelfordCombine(T val, T* mean, T* m2, int* count) {
-  // Use Welford Online algorithem to compute mean and variance
+  // Use Welford Online algorithm to compute mean and variance
   // For more details you can refer to:
   // https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm
   *count += 1;
@@ -157,10 +241,10 @@ __inline__ __device__ void WelfordWarpReduce(
   *m2 = thread_m2;
   *count = thread_count;
   for (int mask = thread_group_width / 2; mask > 0; mask /= 2) {
-    T b_mean = __shfl_down_sync(0xffffffff, *mean, mask, thread_group_width);
-    T b_m2 = __shfl_down_sync(0xffffffff, *m2, mask, thread_group_width);
+    T b_mean = __shfl_down_sync(kFinalMask, *mean, mask, thread_group_width);
+    T b_m2 = __shfl_down_sync(kFinalMask, *m2, mask, thread_group_width);
     int b_count =
-        __shfl_down_sync(0xffffffff, *count, mask, thread_group_width);
+        __shfl_down_sync(kFinalMask, *count, mask, thread_group_width);
     WelfordCombine(b_mean, b_m2, b_count, mean, m2, count);
   }
 }
@@ -347,7 +431,51 @@ __inline__ __device__ T BlockAllReduce(T val) {
   return result_broadcast;
 }
 
+namespace detail {
+
+template <typename TInput>
+struct TInputHelper;
+
+template <>
+struct TInputHelper<half> {
+  typedef __half2 vec2_type;
+  static __inline__ __device__ float2 to_float2(vec2_type a) {
+    return __half22float2(a);
+  }
+  static __inline__ __device__ vec2_type to_vec2(float2 a) {
+    return __float22half2_rn(a);
+  }
+};
+
+template <>
+struct TInputHelper<float> {
+  typedef float2 vec2_type;
+  static __inline__ __device__ float2 to_float2(vec2_type a) {
+    return a;
+  }
+  static __inline__ __device__ vec2_type to_vec2(float2 a) {
+    return a;
+  }
+};
+
+#if defined(__CUDA_ARCH__) && (__CUDACC_VER_MAJOR__ >= 11) && \
+    (__CUDA_ARCH__ >= 800)
+template <>
+struct TInputHelper<bfloat16> {
+  typedef bfloat16_2 vec2_type;
+  static __inline__ __device__ float2 to_float2(vec2_type a) {
+    return __bfloat1622float2(a);
+  }
+  static __inline__ __device__ vec2_type to_vec2(float2 a) {
+    return __float22bfloat162_rn(a);
+  }
+};
+#endif
+
+} // namespace detail
+
 template <
+    typename TInput,
     bool FuseSwish,
     int H,
     int W,
@@ -357,37 +485,43 @@ template <
     int BANK_CONFLICT = 0,
     int NUM_THREADS = 1024>
 __global__ __launch_bounds__(NUM_THREADS) void group_norm_smem(
-    const half* X,
-    half* Y,
-    half* gamma,
-    half* beta,
+    const TInput* X,
+    TInput* Y,
+    TInput* gamma,
+    TInput* beta,
     int N,
     float epsilon) {
   constexpr int C_G_2 = C_G / 2;
   constexpr int C_G_stride = C_G_2 + BANK_CONFLICT;
   extern __shared__ int svals_[];
-  auto* svals = reinterpret_cast<__half2*>(&svals_[0]);
+  using vec2_type = typename detail::TInputHelper<TInput>::vec2_type;
+  auto to_float2 = detail::TInputHelper<TInput>::to_float2;
+  auto to_vec2 = detail::TInputHelper<TInput>::to_vec2;
+  auto* svals = reinterpret_cast<vec2_type*>(&svals_[0]);
 
-  int32_t g = blockIdx.x;
-  int32_t start_c = g * C_G;
-  int32_t n = blockIdx.y;
+  const int32_t g = blockIdx.x;
+  const int32_t start_c = g * C_G;
+  const int32_t n = blockIdx.y;
 
   // X: [N, H, W, C]
-  int32_t strides[4] = {H * W * C, W * C, C, 1};
+  // last stride is 1
+  const int32_t src_strides[3] = {H * W * C, W * C, C};
+  const int32_t smem_strides[2] = {W * C_G_stride, C_G_stride};
   for (int32_t load_idx = threadIdx.x; load_idx < H / ILP * W * C_G_2;
        load_idx += blockDim.x) {
-    auto c_g_2 = load_idx % C_G_2;
-    auto w = (load_idx / C_G_2) % W;
-    auto h_ilp = ((load_idx / C_G_2) / W);
+    const auto c_g_2 = load_idx % C_G_2;
+    const auto w = (load_idx / C_G_2) % W;
+    const auto h_ilp = ((load_idx / C_G_2) / W);
 
 #pragma unroll ILP
     for (auto ii = 0; ii < ILP; ++ii) {
-      const __half2* src = reinterpret_cast<const __half2*>(
-          &(X[n * strides[0] + (h_ilp * ILP + ii) * strides[1] +
-              w * strides[2] + (start_c + c_g_2 * 2)]));
-      __half2* dst =
-          &svals[(h_ilp * ILP + ii) * W * C_G_stride + w * C_G_stride + c_g_2];
-      cutlass::arch::cp_async_zfill<sizeof(__half2)>(dst, src, true);
+      const vec2_type* const src = reinterpret_cast<const vec2_type*>(
+          &(X[n * src_strides[0] + (h_ilp * ILP + ii) * src_strides[1] +
+              w * src_strides[2] + (start_c + c_g_2 * 2)]));
+      vec2_type* const dst = &svals
+                                 [(h_ilp * ILP + ii) * smem_strides[0] +
+                                  w * smem_strides[1] + c_g_2];
+      cutlass::arch::cp_async_zfill<sizeof(vec2_type)>(dst, src, true);
     }
   }
   cutlass::arch::cp_async_wait<0>();
@@ -395,14 +529,14 @@ __global__ __launch_bounds__(NUM_THREADS) void group_norm_smem(
   float thread_sum = 0;
   for (int32_t load_idx = threadIdx.x; load_idx < H / ILP * W * C_G_2;
        load_idx += blockDim.x) {
-    auto c_g_2 = load_idx % C_G_2;
-    auto w = (load_idx / C_G_2) % W;
-    auto h_ilp = ((load_idx / C_G_2) / W);
+    const auto c_g_2 = load_idx % C_G_2;
+    const auto w = (load_idx / C_G_2) % W;
+    const auto h_ilp = ((load_idx / C_G_2) / W);
 #pragma unroll ILP
     for (auto ii = 0; ii < ILP; ++ii) {
-      half2 valh =
-          svals[(h_ilp * ILP + ii) * W * C_G_stride + w * C_G_stride + c_g_2];
-      float2 val = __half22float2(valh);
+      const vec2_type valh = svals
+          [(h_ilp * ILP + ii) * smem_strides[0] + w * smem_strides[1] + c_g_2];
+      const float2 val = to_float2(valh);
       thread_sum += val.x + val.y;
     }
   }
@@ -413,15 +547,15 @@ __global__ __launch_bounds__(NUM_THREADS) void group_norm_smem(
   float thread_sq_sum = 0;
   for (int32_t load_idx = threadIdx.x; load_idx < H / ILP * W * C_G_2;
        load_idx += blockDim.x) {
-    auto c_g_2 = load_idx % C_G_2;
-    auto w = (load_idx / C_G_2) % W;
-    auto h_ilp = ((load_idx / C_G_2) / W);
+    const auto c_g_2 = load_idx % C_G_2;
+    const auto w = (load_idx / C_G_2) % W;
+    const auto h_ilp = ((load_idx / C_G_2) / W);
 
 #pragma unroll ILP
     for (auto ii = 0; ii < ILP; ++ii) {
-      half2 valh =
-          svals[(h_ilp * ILP + ii) * W * C_G_stride + w * C_G_stride + c_g_2];
-      float2 val = __half22float2(valh);
+      const vec2_type valh = svals
+          [(h_ilp * ILP + ii) * smem_strides[0] + w * smem_strides[1] + c_g_2];
+      const float2 val = to_float2(valh);
       thread_sq_sum += (val.x - block_mean) * (val.x - block_mean) +
           (val.y - block_mean) * (val.y - block_mean);
     }
@@ -434,34 +568,37 @@ __global__ __launch_bounds__(NUM_THREADS) void group_norm_smem(
 
   for (int32_t load_idx = threadIdx.x; load_idx < H / ILP * W * C_G_2;
        load_idx += blockDim.x) {
-    auto c_g_2 = load_idx % C_G_2;
-    auto w = (load_idx / C_G_2) % W;
-    auto h_ilp = ((load_idx / C_G_2) / W);
+    const auto c_g_2 = load_idx % C_G_2;
+    const auto w = (load_idx / C_G_2) % W;
+    const auto h_ilp = ((load_idx / C_G_2) / W);
 
-    auto g = __half22float2(
-        *reinterpret_cast<const __half2*>(&gamma[start_c + c_g_2 * 2]));
-    g.x *= block_inv_std;
-    g.y *= block_inv_std;
-    auto b = __half22float2(
-        *reinterpret_cast<const __half2*>(&beta[start_c + c_g_2 * 2]));
+    const auto dst_stride3_offset = start_c + c_g_2 * 2;
+    const auto g_v2 =
+        *reinterpret_cast<const vec2_type*>(gamma + dst_stride3_offset);
+    auto g_f2 = to_float2(g_v2);
+    g_f2.x *= block_inv_std;
+    g_f2.y *= block_inv_std;
+    const auto b_v2 =
+        *reinterpret_cast<const vec2_type*>(beta + dst_stride3_offset);
+    const auto b_f2 = to_float2(b_v2);
 
 #pragma unroll ILP
     for (auto ii = 0; ii < ILP; ++ii) {
-      __half2* src =
-          &svals[(h_ilp * ILP + ii) * W * C_G_stride + w * C_G_stride + c_g_2];
-      __half2* dst = reinterpret_cast<__half2*>(
-          &(Y[n * strides[0] + (h_ilp * ILP + ii) * strides[1] +
-              w * strides[2] + (start_c + c_g_2 * 2)]));
+      const vec2_type src = svals
+          [(h_ilp * ILP + ii) * smem_strides[0] + w * smem_strides[1] + c_g_2];
+      vec2_type* const dst = reinterpret_cast<vec2_type*>(
+          &(Y[n * src_strides[0] + (h_ilp * ILP + ii) * src_strides[1] +
+              w * src_strides[2] + dst_stride3_offset]));
 
-      auto fsrc = __half22float2(*src);
+      const auto fsrc = to_float2(src);
       float2 result;
-      result.x = (fsrc.x - block_mean) * g.x + b.x;
-      result.y = (fsrc.y - block_mean) * g.y + b.y;
+      result.x = (fsrc.x - block_mean) * g_f2.x + b_f2.x;
+      result.y = (fsrc.y - block_mean) * g_f2.y + b_f2.y;
       if (FuseSwish) {
         result.x = result.x * sigmoid(result.x);
         result.y = result.y * sigmoid(result.y);
       }
-      *dst = __float22half2_rn(result);
+      *dst = to_vec2(result);
     }
   }
 }
@@ -560,7 +697,7 @@ struct AffineStore {
       gamma_val = gamma[gamma_beta_offset];
       beta_val = beta[gamma_beta_offset];
     }
-
+    FSigmoid<DST> fsigmoid;
 #pragma unroll
     for (int i = 0; i < PackSize; ++i) {
       DST normalized_i = static_cast<DST>(src[i]);
@@ -571,7 +708,7 @@ struct AffineStore {
         y_pack.elem[i] = normalized_i;
       }
       if (FuseSwish) {
-        y_pack.elem[i] = y_pack.elem[i] * hsigmoid(y_pack.elem[i]);
+        y_pack.elem[i] = y_pack.elem[i] * fsigmoid(y_pack.elem[i]);
       }
     }
     *(reinterpret_cast<layer_norm::PackType<DST, PackSize>*>(y) +
@@ -673,6 +810,7 @@ struct ChannelsLastStore {
             gamma_beta_offset);
     }
 
+    FSigmoid<DST> fsigmoid;
 #pragma unroll
     for (int i = 0; i < PackSize; ++i) {
       DST normalized_i = static_cast<DST>(src[i]);
@@ -683,7 +821,7 @@ struct ChannelsLastStore {
         y_pack.elem[i] = normalized_i;
       }
       if (FuseSwish) {
-        y_pack.elem[i] = y_pack.elem[i] * hsigmoid(y_pack.elem[i]);
+        y_pack.elem[i] = y_pack.elem[i] * fsigmoid(y_pack.elem[i]);
       }
     }
     *(reinterpret_cast<layer_norm::PackType<DST, PackSize>*>(y) + y_offset) =
@@ -756,7 +894,6 @@ void GroupNormForwardGpu(
     ComputeType* mean,
     ComputeType* inv_variance,
     bool channels_first) {
-  // using ComputeType = typename layer_norm::DefaultComputeType<T>::type;
   if (channels_first) {
     layer_norm::DirectLoad<T, ComputeType> load(x_ptr, norm_size);
     AffineStore<ComputeType, T, affine, FuseSwish> store(
@@ -812,7 +949,7 @@ void DispatchGroupNormForwardGpu(
     T2* mean,
     T2* inv_variance,
     bool channels_first) {
-  using ComputeType = typename layer_norm::DefaultComputeType<T>::type;
+  using ComputeType = T2;
   if (gamma_ptr != nullptr && beta_ptr != nullptr) {
     GroupNormForwardGpu<T, ComputeType, true, FuseSwish>(
         stream,
@@ -846,12 +983,12 @@ void DispatchGroupNormForwardGpu(
   }
 }
 
-template <bool FuseSwish, int H, int W, int C, int G>
-cudaError_t invokeGroupNorm_half(
-    half* output,
-    half* input,
-    half* gamma,
-    half* beta,
+template <typename TInput, bool FuseSwish, int H, int W, int C, int G>
+cudaError_t invokeGroupNorm(
+    TInput* output,
+    TInput* input,
+    TInput* gamma,
+    TInput* beta,
     int N,
     const float eps,
     const int max_smem_size,
@@ -868,58 +1005,66 @@ cudaError_t invokeGroupNorm_half(
   const double epsilon = eps;
   bool channels_first = false;
 
-  // Use a little big more shared_memory to reduce occupancy and boost perf.
+  // Use a little bit more shared_memory to reduce occupancy and boost perf.
   constexpr int MEM_BANK_CONFLICT = 1;
 
   // Bank conflict doesn't seem to matter to perf
   constexpr int BANK_CONFLICT = 0;
 
-  const auto smem = H * W * (C_G_2 + MEM_BANK_CONFLICT) * 2 * sizeof(uint16_t);
+  constexpr auto smem =
+      H * W * (C_G_2 + MEM_BANK_CONFLICT) * 2 * sizeof(TInput);
 
   // C_G must be even, or we can have misaligned address for cp.async
   // reserve some shared_mem for block reduction
   if (H % 8 == 0 && C_G % 2 == 0 && smem <= max_smem_size - 1000) {
-    GROUP_NORM_CUDA_CHECK(cudaFuncSetAttribute(
-        group_norm_smem<FuseSwish, H, W, C, C_G, ILP, BANK_CONFLICT>,
-        cudaFuncAttributeMaxDynamicSharedMemorySize,
-        smem));
-
     constexpr int num_threads = std::min(1024, H / ILP * W * C_G_2);
+
     if constexpr (num_threads > 0) {
+      auto kernel_func = group_norm_smem<
+          TInput,
+          FuseSwish,
+          H,
+          W,
+          C,
+          C_G,
+          ILP,
+          BANK_CONFLICT,
+          num_threads>;
+      GROUP_NORM_CUDA_CHECK(cudaFuncSetAttribute(
+          kernel_func, cudaFuncAttributeMaxDynamicSharedMemorySize, smem));
       dim3 block(num_threads);
-      group_norm_smem<FuseSwish, H, W, C, C_G, ILP, BANK_CONFLICT, num_threads>
-          <<<dim3(G, N), block, smem, stream>>>(
-              input, output, gamma, beta, N, eps);
+      kernel_func<<<dim3(G, N), block, smem, stream>>>(
+          input, output, gamma, beta, N, eps);
     } else {
-      DispatchGroupNormForwardGpu<half, float, FuseSwish>(
+      DispatchGroupNormForwardGpu<TInput, float, FuseSwish>(
           stream,
           num_instances,
           norm_size,
           channel_size,
           spatial_size,
           epsilon,
-          static_cast<half*>(input),
-          static_cast<half*>(gamma),
-          static_cast<half*>(beta),
-          static_cast<half*>(output),
-          reinterpret_cast<float*>(workspace),
-          reinterpret_cast<float*>(workspace + sizeof(float) * num_instances),
+          input,
+          gamma,
+          beta,
+          output,
+          static_cast<float*>(workspace),
+          static_cast<float*>(workspace) + num_instances,
           channels_first);
     }
   } else {
-    DispatchGroupNormForwardGpu<half, float, FuseSwish>(
+    DispatchGroupNormForwardGpu<TInput, float, FuseSwish>(
         stream,
         num_instances,
         norm_size,
         channel_size,
         spatial_size,
         epsilon,
-        static_cast<half*>(input),
-        static_cast<half*>(gamma),
-        static_cast<half*>(beta),
-        static_cast<half*>(output),
-        reinterpret_cast<float*>(workspace),
-        reinterpret_cast<float*>(workspace + sizeof(float) * num_instances),
+        input,
+        gamma,
+        beta,
+        output,
+        static_cast<float*>(workspace),
+        static_cast<float*>(workspace) + num_instances,
         channels_first);
   }
 

@@ -15,13 +15,13 @@
 """
 Identity module.
 """
-from .module import Module
+from aitemplate.frontend.nn.module import Module
 
 # pylint: disable=C0103
 
 
 class Identity(Module):
-    """The identify of the input."""
+    """The identity of the input."""
 
     def __init__(
         self,

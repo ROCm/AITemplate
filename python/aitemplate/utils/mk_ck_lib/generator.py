@@ -15,7 +15,7 @@
 
 import copy
 
-from . import (
+from aitemplate.utils.mk_ck_lib import (
     conv2d_operation as conv,
     gemm_operation as gemm,
     groupnorm_operation as groupnorm,
@@ -23,6 +23,7 @@ from . import (
     library,
     softmax_operation as softmax,
 )
+
 
 ###########################################################################################################
 # Convolution for 2D Fwd operations
@@ -600,7 +601,7 @@ def CreateGemmRCROperator(manifest):
     return operations
 
 
-def CreateGemmRCRBillinearOperator(manifest, c_element_op):
+def CreateGemmRCRBilinearOperator(manifest, c_element_op):
     operation_kind = library.GemmKind.Gemm
     a_element_desc = library.TensorDesc(
         library.DataType.f16, library.LayoutType.RowMajor
@@ -1390,7 +1391,6 @@ def CreateBmmSoftmaxBmmOperator(
     ]
     c_block_descriptions, b1_block_descriptions = [], []
     for i in range(len(tile_descriptions)):
-
         if i in [0, 2, 4, 5, 9, 11]:
             block_transfer = [16, 16, 1]
         else:
@@ -1505,7 +1505,6 @@ def CreateBmmSoftmaxBmmPermOperator(
 
     c_block_descriptions, b1_block_descriptions = [], []
     for i in range(len(tile_descriptions)):
-
         if i in [0, 2, 4, 5, 9, 11]:
             block_transfer = [16, 16, 1]
         else:
@@ -2431,14 +2430,14 @@ def GenerateTensorOp(manifest):
         library.TensorOperation.AddSigmoid,
         library.MemoryDataOperation.MemorySet,
     )
-    # TranposedConv2d
+    # TransposedConv2d
     CreateConv2dBwdOperator(
         manifest,
         library.Conv2dKind.TransposedConv2d,
         library.TensorOperation.PassThrough,
         library.MemoryDataOperation.MemorySet,
     )
-    # TranposedConv2dBiasRelu
+    # TransposedConv2dBiasRelu
     CreateConv2dBwdBiasOperator(
         manifest,
         library.Conv2dKind.TransposedConv2dBiasRelu,
@@ -2450,37 +2449,37 @@ def GenerateTensorOp(manifest):
     # GemmRCR
     CreateGemmRCROperator(manifest)
     # GemmRCRBias
-    CreateGemmRCRBillinearOperator(manifest, library.TensorOperation.Add)
+    CreateGemmRCRBilinearOperator(manifest, library.TensorOperation.Add)
     # GemmRCRBiasRelu
-    CreateGemmRCRBillinearOperator(manifest, library.TensorOperation.AddRelu)
+    CreateGemmRCRBilinearOperator(manifest, library.TensorOperation.AddRelu)
     # GemmRCRBiasTanh
-    CreateGemmRCRBillinearOperator(manifest, library.TensorOperation.AddTanh)
+    CreateGemmRCRBilinearOperator(manifest, library.TensorOperation.AddTanh)
     # GemmRCRBiasTanh
-    CreateGemmRCRBillinearOperator(manifest, library.TensorOperation.AddFastGelu)
+    CreateGemmRCRBilinearOperator(manifest, library.TensorOperation.AddFastGelu)
     # GemmRCRBiasHardswish
-    CreateGemmRCRBillinearOperator(manifest, library.TensorOperation.AddHardswish)
+    CreateGemmRCRBilinearOperator(manifest, library.TensorOperation.AddHardswish)
     # GemmRCRBiasSwish
-    CreateGemmRCRBillinearOperator(manifest, library.TensorOperation.AddSwish)
+    CreateGemmRCRBilinearOperator(manifest, library.TensorOperation.AddSwish)
     # GemmRCRBiasSigmoid
-    CreateGemmRCRBillinearOperator(manifest, library.TensorOperation.AddSigmoid)
+    CreateGemmRCRBilinearOperator(manifest, library.TensorOperation.AddSigmoid)
     # GemmRCRBiasAdd
-    CreateGemmRCRBillinearOperator(manifest, library.TensorOperation.AddAdd)
+    CreateGemmRCRBilinearOperator(manifest, library.TensorOperation.AddAdd)
     # GemmRCRBiasMul
-    CreateGemmRCRBillinearOperator(manifest, library.TensorOperation.AddMul)
+    CreateGemmRCRBilinearOperator(manifest, library.TensorOperation.AddMul)
     # GemmRCRBiasMul
-    CreateGemmRCRBillinearOperator(manifest, library.TensorOperation.AddMulTanh)
+    CreateGemmRCRBilinearOperator(manifest, library.TensorOperation.AddMulTanh)
     # GemmRCRBiasAddRelu
-    CreateGemmRCRBillinearOperator(manifest, library.TensorOperation.AddAddRelu)
+    CreateGemmRCRBilinearOperator(manifest, library.TensorOperation.AddAddRelu)
     # GemmRCRBiasAddAddRelu
-    CreateGemmRCRBillinearOperator(manifest, library.TensorOperation.AddAddAdd)
+    CreateGemmRCRBilinearOperator(manifest, library.TensorOperation.AddAddAdd)
     # GemmRCRBiasAddAddRelu
-    CreateGemmRCRBillinearOperator(manifest, library.TensorOperation.AddAddAddRelu)
+    CreateGemmRCRBilinearOperator(manifest, library.TensorOperation.AddAddAddRelu)
     # GemmRCRBiasSigmoidMul
-    CreateGemmRCRBillinearOperator(manifest, library.TensorOperation.AddSigmoidMul)
+    CreateGemmRCRBilinearOperator(manifest, library.TensorOperation.AddSigmoidMul)
     # GemmRCRBiasSigmoidMulTanh
-    CreateGemmRCRBillinearOperator(manifest, library.TensorOperation.AddSigmoidMulTanh)
+    CreateGemmRCRBilinearOperator(manifest, library.TensorOperation.AddSigmoidMulTanh)
     # GemmRCRBiasMulAdd
-    CreateGemmRCRBillinearOperator(manifest, library.TensorOperation.AddMulAdd)
+    CreateGemmRCRBilinearOperator(manifest, library.TensorOperation.AddMulAdd)
     # BmmRCR
     CreateBmmRCROperator(manifest)
     # BmmRRR

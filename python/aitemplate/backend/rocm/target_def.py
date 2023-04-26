@@ -18,20 +18,28 @@ Rocm target specialization.
 # pylint: disable=W0702,W0707,W0611,C0415
 
 import json
+import logging
 import os
 import re
 import shutil
 import sys
 from typing import List
 
-from aitemplate.backend.target import AIT_STATIC_FILES_PATH
+from aitemplate.backend import registry
 
-from ...utils import logger
+from aitemplate.backend.target import (
+    AIT_STATIC_FILES_PATH,
+    COMPOSABLE_KERNEL_PATH,
+    Target,
+)
 
-from .. import registry
-from ..target import COMPOSABLE_KERNEL_PATH, Target
+from aitemplate.utils import environ
+from aitemplate.utils.misc import is_linux
 
 # pylint: disable=W0613
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class ROCM(Target):
@@ -105,7 +113,7 @@ class ROCM(Target):
 
         ck_paths = self._get_ck_paths()
         options = [
-            "-O3",
+            environ.get_compiler_opt_level(),
             "-fPIC",
             "-fvisibility=hidden",
             "-std=c++17",
@@ -117,10 +125,10 @@ class ROCM(Target):
         ]
         if self._arch in {"GFX908", "gfx908"}:
             options.append("-DCK_AMD_GPU_GFX908")
-            options.append("--amdgpu-target=gfx908")
+            options.append("--offload-arch=gfx908")
         elif self._arch in {"GFX90a", "gfx90a"}:
             options.append("-DCK_AMD_GPU_GFX90A")
-            options.append("--amdgpu-target=gfx90a")
+            options.append("--offload-arch=gfx90a")
         else:
             raise RuntimeError("Unsupported GPU Arch")
         for path in ck_paths:
@@ -259,9 +267,7 @@ class FBROCM(ROCM):
         convert_hippcc_json = parutil.get_file_path(
             os.path.join("aitemplate/testing", "convert_hipcc_cmd")
         )
-        logger.info(
-            __name__, f"Load the hipcc compile option from {convert_hippcc_json}"
-        )
+        _LOGGER.info(f"Load the hipcc compile option from {convert_hippcc_json}")
         with open(convert_hippcc_json, "r") as hipcc_options_json:
             self.hipcc_options_json = json.load(hipcc_options_json)
 
@@ -283,7 +289,7 @@ class FBROCM(ROCM):
 
         ck_paths = self._get_ck_paths()
         options = self.hipcc_options_json["args"] + [
-            "-O3",
+            environ.get_compiler_opt_level(),
             "-fPIC",
             "-fvisibility=hidden",
             "-std=c++17",
@@ -314,7 +320,16 @@ class FBROCM(ROCM):
         There is no ld by default in the prod env. Instead, we use ld from the gvfs path.
         """
         ld = self.hipcc_options_json["ld"]
-        return " ".join([ld, "-r -b binary -o {target} {src}"])
+        objcopy = self.hipcc_options_json["objcopy"]
+        cmd = " ".join([ld, "-r -b binary -o {target} {src}"])
+        # Support models with >2GB constants on Linux only
+        if is_linux():
+            cmd += (
+                f" && {objcopy} --rename-section"
+                " .data=.lrodata,alloc,load,readonly,data,contents"
+                " {target} {target}"
+            )
+        return cmd
 
     def cc(self):
         return self.hipcc_options_json["hipcc_bin"]

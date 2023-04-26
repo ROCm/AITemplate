@@ -15,19 +15,22 @@
 """
 Automatic detect target for testing
 """
+import logging
 import os
 from subprocess import PIPE, Popen
 
-from ..backend.target import CUDA, ROCM
-from ..utils import logger
+from aitemplate.backend.target import CUDA, ROCM
 
 # pylint: disable=W0702, W0612,R1732
+
+
+_LOGGER = logging.getLogger(__name__)
 
 IS_CUDA = None
 FLAG = ""
 
 
-def _detect_cuda():
+def _detect_cuda_with_nvidia_smi():
     try:
         proc = Popen(
             ["nvidia-smi", "--query-gpu=gpu_name", "--format=csv"],
@@ -36,13 +39,45 @@ def _detect_cuda():
         )
         stdout, stderr = proc.communicate()
         stdout = stdout.decode("utf-8")
-        if "A100" in stdout or "RTX 30" in stdout or "A30" in stdout:
+        if "H100" in stdout:
+            return "90"
+        if any(a in stdout for a in ["A100", "A10G", "RTX 30", "A30", "RTX 40"]):
             return "80"
         if "V100" in stdout:
             return "70"
         if "T4" in stdout:
             return "75"
         return None
+    except Exception:
+        return None
+
+
+def _detect_cuda():
+    try:
+        from cuda import cuda
+
+        def assert_cuda(res):
+            if res[0].value != 0:
+                raise RuntimeError(f"CUDA error code={res[0].value}")
+            return res[1:]
+
+        assert_cuda(cuda.cuInit(0))
+        # Get Compute Capability of the first Visible device
+        major, minor = assert_cuda(cuda.cuDeviceComputeCapability(0))
+        comp_cap = major * 10 + minor
+        if comp_cap >= 90:
+            return "90"
+        elif comp_cap >= 80:
+            return "80"
+        elif comp_cap >= 75:
+            return "75"
+        elif comp_cap >= 70:
+            return "70"
+        else:
+            return None
+    except ImportError:
+        # go back to old way to detect the CUDA arch
+        return _detect_cuda_with_nvidia_smi()
     except Exception:
         return None
 
@@ -76,7 +111,7 @@ def detect_target(**kwargs):
             return CUDA(arch=FLAG, **kwargs)
         else:
             return ROCM(arch=FLAG, **kwargs)
-    doc_flag = os.getenv("BUILD_DOCS", None)
+    doc_flag = os.getenv("AIT_BUILD_DOCS", None)
     if doc_flag is not None:
         return CUDA(arch="80", **kwargs)
     flag = _detect_cuda()
@@ -84,13 +119,13 @@ def detect_target(**kwargs):
         IS_CUDA = True
         FLAG = flag
 
-        logger.info(__name__, "Set target to CUDA")
+        _LOGGER.info("Set target to CUDA")
         return CUDA(arch=flag, **kwargs)
     flag = _detect_rocm()
     if flag is not None:
         IS_CUDA = False
         FLAG = flag
 
-        logger.info(__name__, "Set target to ROCM")
+        _LOGGER.info("Set target to ROCM")
         return ROCM(arch=flag, **kwargs)
     raise RuntimeError("Unsupported platform")

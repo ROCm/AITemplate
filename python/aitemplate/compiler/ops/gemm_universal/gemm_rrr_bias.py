@@ -15,9 +15,9 @@
 """
 gemm rrr with bias
 """
-from ...base import IntImm, Tensor
-from ...tensor_accessor import TensorAccessor
-from . import gemm_rrr
+from aitemplate.compiler.base import IntImm, Tensor
+from aitemplate.compiler.ops.gemm_universal import gemm_rrr
+from aitemplate.compiler.tensor_accessor import TensorAccessor
 
 # pylint: disable=C0103,W0223,W0221,W0613
 
@@ -80,7 +80,7 @@ class gemm_rrr_bias(gemm_rrr):
         self._sanity_check(a, b)
         output_shape = self._infer_shapes(a, b, bias)
         self._extract_epilogue_alignment(output_shape)
-        output = Tensor(output_shape, src_ops={self})
+        output = Tensor(output_shape, src_ops={self}, dtype=a.dtype())
         self._attrs["outputs"] = [output]
         self._attrs["output_accessors"] = [TensorAccessor(output)]
         return output

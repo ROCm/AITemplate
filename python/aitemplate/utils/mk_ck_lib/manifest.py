@@ -22,7 +22,7 @@
 import os.path
 import re
 
-from .library import OperationKind, OperationKindNames
+from aitemplate.utils.mk_ck_lib.library import OperationKind, OperationKindNames
 
 
 class Manifest:
@@ -87,7 +87,6 @@ class Manifest:
             return []
 
     def filter_out_kernels(self, kernel_name, kernel_filter_list):
-
         for kernel_filter_re in kernel_filter_list:
             if kernel_filter_re.search(kernel_name) is not None:
                 return True

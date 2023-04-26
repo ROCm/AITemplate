@@ -25,8 +25,8 @@ B: [K, N]
 C: [M, N]
 """
 
-from ...base import IntImm, Tensor
-from ..gemm_universal import gemm_common as common
+from aitemplate.compiler.base import IntImm, Tensor
+from aitemplate.compiler.ops.gemm_universal import gemm_common as common
 
 # pylint: disable=C0103,W0223,W0221,W0613
 
@@ -103,7 +103,7 @@ class gemm_rrr_small_nk(common.gemm):
         self._attrs["inputs"] = [a, b]
         self._set_depth()
         output_shape = self._infer_shapes(a, b)
-        output = Tensor(output_shape, src_ops={self})
+        output = Tensor(output_shape, src_ops={self}, dtype=a.dtype())
         self._attrs["outputs"] = [output]
         # self._attrs["output_accessors"] = [TensorAccessor(output)]
         return output

@@ -43,6 +43,13 @@ enum class AITemplateError : int {
   AITemplateFailure = 1,
 };
 
+#define AIT_ERROR_CHECK(call)                                             \
+  if ((call) != AITemplateError::AITemplateSuccess) {                     \
+    throw std::runtime_error(                                             \
+        std::string(#call " API call failed at ") + __FILE__ + ", line" + \
+        std::to_string(__LINE__));                                        \
+  }
+
 struct AITemplateParamShape {
   AITemplateParamShape() : shape_data(nullptr), size(0) {}
   AITemplateParamShape(const int64_t* shape_data_in, size_t size_in)
@@ -53,7 +60,7 @@ struct AITemplateParamShape {
 
   size_t Numel() const {
     return std::accumulate(
-        shape_data, shape_data + size, 1, std::multiplies<int64_t>());
+        shape_data, shape_data + size, (int64_t)1, std::multiplies<int64_t>());
   }
 };
 
@@ -64,6 +71,7 @@ enum class AITemplateDtype {
   kInt,
   kLong,
   kBool,
+  kBFloat16,
 };
 
 struct AITData {
@@ -83,6 +91,7 @@ struct AITData {
 inline size_t AITemplateDtypeSizeBytes(AITemplateDtype dtype) {
   switch (dtype) {
     case AITemplateDtype::kHalf:
+    case AITemplateDtype::kBFloat16:
       return 2;
     case AITemplateDtype::kFloat:
       return 4;
@@ -95,6 +104,7 @@ inline size_t AITemplateDtypeSizeBytes(AITemplateDtype dtype) {
     case AITemplateDtype::kUnset:
       throw std::runtime_error("Unset dtype has no size!");
   }
+  throw std::runtime_error("dtype handling is not implemented!");
 }
 
 struct AITemplateStreamOpaque {};
@@ -140,6 +150,37 @@ AIT_EXPORT AITemplateError AITemplateModelContainerSetConstant(
     const char* name,
     const AITData* tensor);
 
+AIT_EXPORT AITemplateError AITemplateModelContainerSetManyConstants(
+    AITemplateModelHandle handle,
+    const char** names,
+    const AITData* tensors,
+    size_t num_tensors);
+
+AIT_EXPORT AITemplateError AITemplateModelContainerSetDoubleBufferConstant(
+    AITemplateModelHandle handle,
+    AITemplateStreamHandle stream_handle,
+    const char* name,
+    const AITData* tensor);
+
+AIT_EXPORT AITemplateError AITemplateModelContainerSetManyDoubleBufferConstants(
+    AITemplateModelHandle handle,
+    AITemplateStreamHandle stream_handle,
+    const char** names,
+    const AITData* tensors,
+    size_t num_tensors);
+
+AIT_EXPORT AITemplateError AITemplateModelContainerGetNumConstants(
+    AITemplateModelHandle handle,
+    bool unbound_constants_only,
+    bool constant_folding_inputs_only,
+    size_t* num_constants_out);
+
+AIT_EXPORT AITemplateError AITemplateModelContainerGetConstantNames(
+    AITemplateModelHandle handle,
+    bool unbound_constants_only,
+    bool constant_folding_inputs_only,
+    const char** constant_names_out);
+
 AIT_EXPORT AITemplateError AITemplateModelContainerRun(
     AITemplateModelHandle handle,
     const AITData* inputs,
@@ -153,8 +194,8 @@ AIT_EXPORT AITemplateError AITemplateModelContainerRun(
 
 // Like AITemplateModelContainerRun, but expects outputs to be allocated on the
 // host. Does an extra sync/copy at the end to copy them over. Warning: don't
-// use this! It's not optimal with respect to performance. It's here for use by
-// internal constant folding passes.
+// use this! It's not optimal with respect to performance. It's here for use if
+// you need it for debugging.
 AIT_EXPORT AITemplateError AITemplateModelContainerRunWithOutputsOnHost(
     AITemplateModelHandle handle,
     const AITData* inputs,
@@ -165,11 +206,22 @@ AIT_EXPORT AITemplateError AITemplateModelContainerRunWithOutputsOnHost(
     bool graph_mode,
     int64_t** output_shapes_out);
 
+/// Do per op profile and write the profiling report to file.
+AIT_EXPORT AITemplateError AITemplateModelContainerProfile(
+    AITemplateModelHandle handle,
+    const AITData* inputs,
+    size_t num_inputs,
+    AITData* outputs,
+    size_t num_outputs,
+    AITemplateStreamHandle stream_handle,
+    size_t num_iters,
+    const char* filename);
+
 AIT_EXPORT AITemplateError AITemplateModelContainerBenchmark(
     AITemplateModelHandle handle,
     const AITData* inputs,
     size_t num_inputs,
-    AITData* ouputs,
+    AITData* outputs,
     size_t num_outputs,
     AITemplateStreamHandle stream_handle,
     bool graph_mode,
@@ -187,6 +239,16 @@ AIT_EXPORT AITemplateError AITemplateModelContainerGetInputName(
     AITemplateModelHandle handle,
     size_t input_idx,
     const char** input_name_out);
+
+AIT_EXPORT AITemplateError AITemplateModelContainerGetMaximumInputShape(
+    AITemplateModelHandle handle,
+    size_t input_idx,
+    AITemplateParamShape* shape);
+
+AIT_EXPORT AITemplateError AITemplateModelContainerGetInputDtype(
+    AITemplateModelHandle handle,
+    size_t input_idx,
+    AITemplateDtype* input_dtype);
 
 AIT_EXPORT AITemplateError AITemplateModelContainerGetNumOutputs(
     AITemplateModelHandle handle,
@@ -210,6 +272,19 @@ AIT_EXPORT AITemplateError AITemplateModelContainerGetOutputDtype(
 AIT_EXPORT AITemplateError AITemplateModelContainerGetNumRuntimes(
     AITemplateModelHandle handle,
     size_t* num_runtimes_out);
+
+AIT_EXPORT AITemplateError AITemplateModelContainerFoldConstants(
+    AITemplateModelHandle handle,
+    AITemplateStreamHandle stream_handle,
+    bool sync);
+
+AIT_EXPORT AITemplateError AITemplateModelContainerFoldConstantsInDoubleBuffer(
+    AITemplateModelHandle handle,
+    AITemplateStreamHandle stream_handle,
+    bool sync);
+
+AIT_EXPORT AITemplateError
+AITemplateModelContainerSwapConstants(AITemplateModelHandle handle);
 
 AIT_EXPORT AITemplateError AITemplateAllocatorCreate(
     AITemplateAllocator** allocator_out,

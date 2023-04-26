@@ -16,10 +16,9 @@
 GEMM Specialization: (A.permute(0, 2, 1)[col] @ B[row] + Bias)
 """
 
+from aitemplate.compiler.base import IntImm, Tensor
+from aitemplate.compiler.ops.gemm_universal import perm021fc_crc
 from aitemplate.compiler.tensor_accessor import TensorAccessor
-
-from ...base import IntImm, Tensor
-from . import perm021fc_crc
 
 # pylint: disable=C0103, W0223, W0221
 
@@ -71,7 +70,7 @@ class perm021fc_crc_bias(perm021fc_crc):
         self._sanity_check(a, b)
         output_shape = self._infer_shapes(a, b, bias)
         self._extract_epilogue_alignment(output_shape)
-        output = Tensor(output_shape, src_ops={self})
+        output = Tensor(output_shape, src_ops={self}, dtype=a._attrs["dtype"])
         self._attrs["outputs"] = [output]
         self._attrs["output_accessors"] = [
             TensorAccessor(tensor) for tensor in self._attrs["outputs"]

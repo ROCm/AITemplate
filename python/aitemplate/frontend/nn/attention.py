@@ -15,20 +15,15 @@
 """
 Frontend for attention module
 """
+from aitemplate.compiler import ops
+from aitemplate.compiler.ops import flash_attention
+from aitemplate.compiler.ops.common.epilogue import FuncEnum
+from aitemplate.frontend import Tensor
+from aitemplate.frontend.nn.dropout import Dropout
+from aitemplate.frontend.nn.linear import Linear
+from aitemplate.frontend.nn.module import Module
+from aitemplate.frontend.nn.parameter import Parameter
 from aitemplate.testing import detect_target
-
-from ...compiler import ops
-from ...compiler.ops import flash_attention
-from ...compiler.ops.common.epilogue import FuncEnum
-from .. import Tensor
-from .dropout import Dropout
-from .linear import Linear
-from .module import Module
-from .parameter import Parameter
-
-# pylint: disable=C0103
-
-USE_CUDA = detect_target().name() == "cuda"
 
 
 class FlashAttention(Module):
@@ -52,7 +47,7 @@ class FlashAttention(Module):
         causal=False,
         dtype="float16",
     ):
-        """Initilize attention module, create a tensor for seqlen"""
+        """Initialize attention module, create a tensor for seqlen"""
         super().__init__()
         self.cu_length = Parameter(shape=[batch_size + 1], dtype="int32")
         self.op = flash_attention(
@@ -83,7 +78,7 @@ class MultiheadAttention(Module):
     where :math:`head_i = \text{Attention}(QW_i^Q, KW_i^K, VW_i^V)`.
 
     Args:
-        dim: toal dimension of the model
+        dim: total dimension of the model
         batch_size: batch size
         seq_len: sequence length
         num_heads: Number of parallel attention heads. Default: 8
@@ -94,6 +89,8 @@ class MultiheadAttention(Module):
         causal: default: `False`.
         mask_seq: sequence mask, default: ``0``.
     """
+
+    USE_CUDA = None
 
     def __init__(
         self,
@@ -113,9 +110,12 @@ class MultiheadAttention(Module):
         assert (
             dim % num_heads == 0
         ), f"dim {dim} should be divisible by num_heads {num_heads}"
+        if MultiheadAttention.USE_CUDA is None:
+            MultiheadAttention.USE_CUDA = detect_target().name() == "cuda"
+
         self.num_heads = num_heads
         head_dim = dim // num_heads
-        self.scale = head_dim ** -0.5
+        self.scale = head_dim**-0.5
         self.causal = causal
         self.has_residual = has_residual
         self.mask_seq = mask_seq
@@ -149,7 +149,7 @@ class MultiheadAttention(Module):
                 shape=[mask_seq, num_heads, head_dim], dtype="float16"
             )
 
-        if USE_CUDA:
+        if self.USE_CUDA:
             # on CUDA flash_attention needs packed QKV as input,
             # then do split + permute inside flash_attn
             # input: (B, S, H)
@@ -165,7 +165,7 @@ class MultiheadAttention(Module):
                 )
         else:
             # on ROCM ck attention (bmm_softmax_bmm) takes three inputs (Q, K, V)
-            # here we generate packed QKV for spliting
+            # here we generate packed QKV for splitting
             # input: (B, seqlen, dim) -> (B*seqlen, dim)
             # gemm: (B*seqlen, 3*dim)
             # reshape to: (B, seqlen, 3, num_heads, head_dim)
@@ -187,7 +187,7 @@ class MultiheadAttention(Module):
         return shape
 
     def qkv_proj(self, x):
-        if USE_CUDA:
+        if self.USE_CUDA:
             if self.use_flash:
                 batch, seq, hidden = self.get_shape(x)
                 out = self.qkv(x)
@@ -204,11 +204,11 @@ class MultiheadAttention(Module):
     def attention(self, x):
         # fused attention
         # output: (B, Seqlen, num_heads, head_dim)
-        if USE_CUDA and self.use_flash:
+        if self.USE_CUDA and self.use_flash:
             # input(x): (B*seqlen, 3, num_heads, head_dim)
             # output: (B, Seqlen, num_heads, head_dim)
             return self.op(x, self.cu_length.tensor())
-        elif USE_CUDA and self.use_mem_eff:
+        elif self.USE_CUDA and self.use_mem_eff:
             (q, k, v) = ops.split()(x, 1, dim=0)
             _, b, num_heads, seqlen, d = self.get_shape(q)
             return self.op(
@@ -217,13 +217,13 @@ class MultiheadAttention(Module):
                 ops.reshape()(v, [b, -1, seqlen, d]),
             )
         else:
-            # intput(q/k/v): (B*num_heads, seqlen, head_dim)
+            # input(q/k/v): (B*num_heads, seqlen, head_dim)
             # attn = (B, S, H) * (B, S, H) = (B, S, S) #RCR
             # softmax on dim -1 (B, S, S)
             # attn@v: (B, S, S) * (B, S, H) = (B, S, H) #RRR
             # reshape: (B, num_head, seqlen, head_dim)
             # permute: (B, Seqlen, num_heads, head_dim)
-            if USE_CUDA:
+            if self.USE_CUDA:
                 scale = Tensor(
                     shape=[], dtype="float16", name="scale", value=self.scale
                 )
@@ -295,7 +295,7 @@ class CrossAttention(Module):
     where :math:`head_i = \text{Attention}(QW_i^Q, KW_i^K, VW_i^V)`.
 
     Args:
-        dim: toal dimension of the model
+        dim: total dimension of the model
         batch_size: batch size
         seq_len: sequence length
         num_heads: Number of parallel attention heads. Default: 8
@@ -352,11 +352,6 @@ class CrossAttention(Module):
         self.proj = Linear(dim, dim, specialization="add" if has_residual else None)
         self.proj_drop = Dropout(proj_drop)
 
-    def qkv_proj(self, x):
-        batch, seq, hidden = self.get_shape(x)
-        x = ops.reshape()(x, [-1, hidden])
-        return self.qkv(x)
-
     def attention(self, q, k, v):
         seqlen = self.seqlen
         seqlen_kv = self.seqlen_kv
@@ -394,3 +389,12 @@ class CrossAttention(Module):
         x = self.proj_drop(x)
         x = ops.reshape()(x, [-1, seq, self.dim])
         return x
+
+
+class ScaledDotProductAttention(Module):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def forward(self, q, k, v):
+        attn = ops.mem_eff_attention(causal=False)(q, k, v)
+        return attn

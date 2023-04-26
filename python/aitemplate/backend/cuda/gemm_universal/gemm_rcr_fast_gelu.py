@@ -18,10 +18,14 @@ where A[RowMajor][M, K], B[ColMajor][N, K], bias[RowMajor][K], C[RowMajor][M, N]
 """
 import jinja2
 
-from ... import registry
+from aitemplate.backend import registry
 
-from ...backend_spec import CUDASpec
-from . import common, common_bias_activation, common_no_bias
+from aitemplate.backend.backend_spec import CUDASpec
+from aitemplate.backend.cuda.gemm_universal import (
+    common,
+    common_bias_activation,
+    common_no_bias,
+)
 
 # pylint: disable=C0103,C0415,W0613,C0301,R1705,R1703
 
@@ -64,22 +68,22 @@ using LinearCombinationFastGELU = LinearCombinationGeneric<GELU_taylor, ElementO
 
 PROBLEM_ARGS_TEMPLATE = jinja2.Template(
     """
-    cutlass::gemm::GemmUniversalMode::kGemm,
-    {M, N, K},
-    split_k,
-    {ElementComputeEpilogue(1), ElementComputeEpilogue(0)},
-    ({{elem_input_type}}*) a_ptr,
-    ({{elem_input_type}}*) b_ptr,
-    nullptr,
-    ({{elem_output_type}}*) (c_ptr) + output_offset,
-    M * K,
-    N * K,
-    N,
-    M * N,
-    K,
-    K,
-    0,
-    output_stride
+    cutlass::gemm::GemmUniversalMode::kGemm,                 // GemmUniversalMode mode
+    {M, N, K},                                               // GemmCoord problem_size
+    split_k,                                                 // int batch_count
+    {ElementComputeEpilogue(1), ElementComputeEpilogue(0)},  // typename EpilogueOutputOp::Params epilogue
+    ({{elem_input_type}}*) a_ptr,                            // void const * ptr_A
+    ({{elem_input_type}}*) b_ptr,                            // void const * ptr_B
+    nullptr,                                                 // void const * ptr_C
+    ({{elem_output_type}}*) (c_ptr) + output_offset,         // void * ptr_D
+    M * K,                                                   // int64_t batch_stride_A
+    N * K,                                                   // int64_t batch_stride_B
+    N,                                                       // int64_t batch_stride_C
+    M * N,                                                   // int64_t batch_stride_D
+    K,                                                       // typename LayoutA::Stride::LongIndex lda
+    K,                                                       // typename LayoutB::Stride::LongIndex ldb
+    0,                                                       // typename LayoutC::Stride::LongIndex ldc
+    output_stride,                                           // typename LayoutC::Stride::LongIndex ldd
 """
 )
 

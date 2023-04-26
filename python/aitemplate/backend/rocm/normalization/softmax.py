@@ -20,10 +20,10 @@ from typing import Any, Dict
 
 import jinja2
 
-from ....compiler.base import IntImm
+from aitemplate.backend import registry
+from aitemplate.backend.rocm.normalization import norm_common
 
-from ... import registry
-from . import norm_common
+from aitemplate.compiler.base import IntImm
 
 EXTRA_HEADERS = jinja2.Template(
     """
@@ -62,8 +62,8 @@ EXEC_TEMPLATE = jinja2.Template(
     auto argument_ptr = device_instance.MakeArgumentPointer(i_inLengths,
                                                             i_inStrides,
                                                             reduceDims,
-                                                            &alpha,
-                                                            &beta,
+                                                            alpha,
+                                                            beta,
                                                             static_cast<ck::half_t *>(input),
                                                             static_cast<ck::half_t *>(output),
                                                             ck::tensor_operation::element_wise::PassThrough{},

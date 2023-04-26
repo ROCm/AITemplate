@@ -21,20 +21,23 @@ from typing import Any, Dict
 
 import jinja2
 
-from ... import registry
-from ...backend_spec import CUDASpec
-from ...common import tensor_accessor_codegen
-from ...target import Target
-from . import layernorm_common
+from aitemplate.backend import registry
+from aitemplate.backend.backend_spec import CUDASpec
+from aitemplate.backend.common import tensor_accessor_codegen
+from aitemplate.backend.cuda.layernorm_sigmoid_mul import layernorm_common
+from aitemplate.backend.target import Target
 
 # pylint: disable=C0301
 
 FUNC_TEMPLATE = jinja2.Template(
     """
 #include <cuda_fp16.h>
+#include <cuda_bf16.h>
 #include "cutlass/cutlass.h"
 #include "cutlass/fast_math.h"
 #include "logging.h"
+
+using bfloat16 = __nv_bfloat16;
 
 {{gamma_beta_const_defs}}
 

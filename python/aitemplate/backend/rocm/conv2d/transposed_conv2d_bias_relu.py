@@ -17,8 +17,8 @@ ROCM codegen functions for transposed_conv2d_bias_relu.
 """
 import jinja2
 
-from ... import registry
-from . import common
+from aitemplate.backend import registry
+from aitemplate.backend.rocm.conv2d import common
 
 # pylint: disable=C0103,C0415,W0613
 
@@ -80,7 +80,7 @@ def conv2d_gen_profiler(func_attrs, workdir, shape_template):
 @registry.reg("rocm.transposed_conv2d_bias_relu.gen_function")
 def conv2d_gen_function(
     func_attrs,
-    exec_cond_remplate,
+    exec_cond_template,
     shape_eval_template,
     shape_save_template,
 ):
@@ -90,7 +90,7 @@ def conv2d_gen_function(
     ----------
     func_attrs : Dict
         Operation attributes.
-    exec_cond_remplate : jinja2.Template
+    exec_cond_template : jinja2.Template
         Generates if statement to execute kernel.
     shape_eval_template : jinja2.Template
         Generates shape calculation.
@@ -106,7 +106,7 @@ def conv2d_gen_function(
     """
     return common.gen_function(
         func_attrs,
-        exec_cond_remplate,
+        exec_cond_template,
         shape_eval_template,
         shape_save_template,
         "bias_relu",

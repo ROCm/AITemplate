@@ -18,12 +18,13 @@ Fused transposed_conv2d_bias op.
 
 from typing import Tuple
 
+from aitemplate.compiler.base import Tensor
+
 from aitemplate.compiler.ops.conv.common_conv2d_bias_activation import (
     conv2d_bias_activation,
 )
+from aitemplate.compiler.ops.conv.transposed_conv2d import transposed_conv2d
 
-from ...base import Tensor
-from .transposed_conv2d import transposed_conv2d
 
 # pylint: disable=C0103
 class transposed_conv2d_bias(transposed_conv2d):
@@ -99,7 +100,7 @@ class transposed_conv2d_bias(transposed_conv2d):
         self._attrs["inputs"] = [x, w, b]
         self._set_depth()
         output_shape = self._infer_shapes(x, w)
-        output = Tensor(output_shape, src_ops={self})
+        output = Tensor(output_shape, src_ops={self}, dtype=x._attrs["dtype"])
         self._extract_exec_path(x)
         self._extract_epilogue_alignment(output_shape)
         self._attrs["outputs"] = [output]

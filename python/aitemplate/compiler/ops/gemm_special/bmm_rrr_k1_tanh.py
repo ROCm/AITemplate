@@ -17,8 +17,8 @@ Operator definition for bmm_rrr_k1_tanh.
 """
 from typing import List
 
-from ...base import IntVar, Tensor
-from ..gemm_universal import bmm_rrr
+from aitemplate.compiler.base import IntVar, Tensor
+from aitemplate.compiler.ops.gemm_universal import bmm_rrr
 
 # pylint: disable=C0103,W0221,C0200
 
@@ -73,7 +73,7 @@ class bmm_rrr_k1_tanh(bmm_rrr):
         self._attrs["inputs"] = [a, b]
         self._set_depth()
         output_shape = self._infer_shapes(a, b)
-        output = Tensor(output_shape, src_ops={self})
+        output = Tensor(output_shape, src_ops={self}, dtype=a.dtype())
         self._attrs["outputs"] = [output]
         return output
 

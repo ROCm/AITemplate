@@ -101,3 +101,19 @@ def fast_gelu(tensor: Any) -> Tensor:
 
 def softplus(tensor: Any) -> Tensor:
     return OP_REGISTRY.get("SOFTPLUS")(tensor)
+
+
+def elu(tensor: Any) -> Tensor:
+    return OP_REGISTRY.get("ELU")(tensor)
+
+
+def softsign(tensor: Any) -> Tensor:
+    return OP_REGISTRY.get("SOFTSIGN")(tensor)
+
+
+def floor_div(tensor: Any) -> Tensor:
+    return OP_REGISTRY.get("FLOOR_DIV")(tensor)
+
+
+def celu(tensor: Any) -> Tensor:
+    return OP_REGISTRY.get("CELU")(tensor)

@@ -18,17 +18,21 @@ Add permute for gemm/bmm if alignment is odd.
 from math import inf
 from typing import Dict, List, Tuple
 
-from ..base import IntImm, IntVar, Operator, Tensor
-from ..ops.common.view_ops import unsqueeze
-from ..ops.gemm_universal import bmm_ccr, bmm_crr, bmm_rcr, bmm_rrr
-from ..ops.tensor import permute021
+from aitemplate.compiler.base import IntImm, IntVar, Operator, Tensor
+from aitemplate.compiler.ops.common.view_ops import unsqueeze
+from aitemplate.compiler.ops.gemm_universal import bmm_ccr, bmm_crr, bmm_rcr, bmm_rrr
+from aitemplate.compiler.ops.tensor import permute021
 
-from .apply_padding import _get_padding_length
-from .fuse_utils import extract_only_one_op
-from .toposort import toposort
-from .transform_strided_ops import _is_supported_op as _is_supported_strided_op
-from .transform_strided_slice import _is_supported_op as _is_supported_strided_slice
-from .transform_utils import (
+from aitemplate.compiler.transform.apply_padding import get_padding_length
+from aitemplate.compiler.transform.fuse_utils import extract_only_one_op
+from aitemplate.compiler.transform.toposort import toposort
+from aitemplate.compiler.transform.transform_strided_ops import (
+    _is_supported_op as _is_supported_strided_op,
+)
+from aitemplate.compiler.transform.transform_strided_slice import (
+    _is_supported_op as _is_supported_strided_slice,
+)
+from aitemplate.compiler.transform.transform_utils import (
     can_be_constant_folded,
     copy_src_op_attributes,
     copy_tensor_attributes,
@@ -63,7 +67,7 @@ def _compute_padding_flops(
     elif _is_strided_tensor(tensor):
         return (
             _matrix_shape_prod(shapes)
-            * _get_padding_length(shapes[padding_idx].value())
+            * get_padding_length(shapes[padding_idx].value(), tensor.dtype())
             / shapes[padding_idx].value()
         )
     else:
@@ -81,7 +85,9 @@ def _compute_slicing_flops(mm_op: Operator, slicing_dim: int, other_dim: int) ->
             can_be_fused = False
 
     if can_be_fused:
-        return other_dim * _get_padding_length(slicing_dim)
+        return other_dim * get_padding_length(
+            slicing_dim, mm_op._attrs["inputs"][0].dtype()
+        )
     else:
         return other_dim * slicing_dim
 
@@ -221,6 +227,12 @@ def _transform_odd_alignment(
 
         op_type = src_op._attrs["op"]
         if op_type not in permutable_pairs:
+            continue
+        # FIXME: This pass only works for half type. We may need to change it to
+        # work with other types such as int8 later. Note that for float type, it
+        # is safe to skip, because gemm/bmm with float inputs always meet alignment
+        # requirements.
+        if src_op._attrs["inputs"][0].dtype() != "float16":
             continue
 
         perm_type = ([False, False], [False, True], [True, False], [True, True])

@@ -21,9 +21,9 @@ https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_onli
 
 import jinja2
 
-from ... import registry
-from ...backend_spec import CUDASpec
-from . import reduce_3d
+from aitemplate.backend import registry
+from aitemplate.backend.backend_spec import CUDASpec
+from aitemplate.backend.cuda.reduce import reduce_3d
 
 
 EXTRA_CODE_TEMPLATE = jinja2.Template(
@@ -66,7 +66,7 @@ struct WelfordData {
       int new_count = new_data.count + count;
       ElementT nb_over_n = ElementT(new_data.count) / ElementT(new_count);
       mean = mean + delta * nb_over_n;
-      m2 =  m2 + new_data.m2 + delta * delta * count * nb_over_n;
+      m2 =  m2 + new_data.m2 + delta * delta * nb_over_n * ElementT(count);
       return WelfordData(new_count, mean, m2);
     }
 
@@ -112,6 +112,39 @@ void shared_load<32>(void *dst, uint32_t ptr) {
     : "r"(ptr));
 }
 
+template <>
+CUTLASS_DEVICE
+void shared_load<48>(void *dst, uint32_t ptr) {
+  uint4 *dst_u128 = reinterpret_cast<uint4 *>(dst);
+  asm volatile("ld.shared.v4.u32 {{ '{%0, %1, %2, %3}, [%4]' }};\\n"
+    :
+      "=r"(dst_u128->x),
+      "=r"(dst_u128->y),
+      "=r"(dst_u128->z),
+      "=r"(dst_u128->w)
+    : "r"(ptr));
+
+  dst_u128++;
+  ptr = ptr + sizeof(uint4);
+  asm volatile("ld.shared.v4.u32 {{ '{%0, %1, %2, %3}, [%4]' }};\\n"
+    :
+      "=r"(dst_u128->x),
+      "=r"(dst_u128->y),
+      "=r"(dst_u128->z),
+      "=r"(dst_u128->w)
+    : "r"(ptr));
+
+  dst_u128++;
+  ptr = ptr + sizeof(uint4);
+  asm volatile("ld.shared.v4.u32 {{ '{%0, %1, %2, %3}, [%4]' }};\\n"
+    :
+      "=r"(dst_u128->x),
+      "=r"(dst_u128->y),
+      "=r"(dst_u128->z),
+      "=r"(dst_u128->w)
+    : "r"(ptr));
+}
+
 } // namespace arch
 
 template <typename ElementT, bool BesselCorrection>
@@ -125,7 +158,7 @@ struct NumericConverter<WelfordData<ElementT, BesselCorrection>,
 
   CUTLASS_HOST_DEVICE
   static result_type convert(source_type const & s) {
-    return WelfordData<ElementT, BesselCorrection>(-1, s, ElementT(0));
+    return WelfordData<ElementT, BesselCorrection>(-1, static_cast<ElementT>(s), ElementT(0));
   }
 
   CUTLASS_HOST_DEVICE
@@ -261,10 +294,10 @@ def var_gen_function(func_attrs) -> str:
     """
     bessel = "true" if func_attrs["unbiased"] else "false"
     backend_spec = CUDASpec()
-    elem_input_type = backend_spec.dtype_to_lib_type(
-        func_attrs["inputs"][0]._attrs["dtype"]
+    elem_output_type = backend_spec.dtype_to_lib_type(
+        func_attrs["outputs"][0]._attrs["dtype"]
     )
-    acc_type = f"WelfordData<{elem_input_type}, {bessel}>"
+    acc_type = f"WelfordData<{elem_output_type}, {bessel}>"
     return reduce_3d.gen_function(
         func_attrs,
         "cutlass::welford_op",

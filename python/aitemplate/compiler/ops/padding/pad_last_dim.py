@@ -19,9 +19,9 @@ from typing import List
 
 import jinja2
 
-from .... import backend
-from ....backend import registry
-from ...base import IntImm, Operator, Tensor
+from aitemplate import backend
+from aitemplate.backend import registry
+from aitemplate.compiler.base import IntImm, Operator, Tensor
 
 # pylint: disable=C0103,W0221
 
@@ -74,7 +74,7 @@ class pad_last_dim(Operator):
         self._attrs["inputs"] = [x]
         self._set_depth()
         output_shape = self._infer_shapes(x)
-        output = Tensor(output_shape, src_ops={self})
+        output = Tensor(output_shape, src_ops={self}, dtype=x._attrs["dtype"])
         self._attrs["outputs"] = [output]
         return output
 

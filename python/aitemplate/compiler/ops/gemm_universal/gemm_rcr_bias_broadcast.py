@@ -17,9 +17,9 @@ gemm_rcr_bias with 2 extra sources.
 BinaryOp2(BinaryOp1(UnaryOp(TensorOp(X) + bias), residual1), residual2)
 """
 
-from ...base import Tensor
-from ...tensor_accessor import TensorAccessor
-from . import gemm_rcr_bias
+from aitemplate.compiler.base import Tensor
+from aitemplate.compiler.ops.gemm_universal import gemm_rcr_bias
+from aitemplate.compiler.tensor_accessor import TensorAccessor
 
 # pylint: disable=C0103, W0223, W0221
 
@@ -27,7 +27,7 @@ from . import gemm_rcr_bias
 class gemm_rcr_bias_broadcast(gemm_rcr_bias):
     def __init__(self):
         super().__init__()
-        self._attrs["epilogue"] = "LinearCombinationResidualBlockV2"
+        self._attrs["epilogue"] = "LinearCombinationResidualBlock"
 
     @staticmethod
     def is_valid_inputs(*inputs):
@@ -49,7 +49,7 @@ class gemm_rcr_bias_broadcast(gemm_rcr_bias):
             for d in inputs[3:]:
                 d_shape = d.shape()
                 if d_shape != base_shape:
-                    msg = "Additional elementwise shape {d_shape} doesn't match gemm_bias' shape {base_shape}"
+                    msg = f"Additional elementwise shape {d_shape} doesn't match gemm_bias' shape {base_shape}"
                     return False, msg
 
         return True, msg
@@ -68,7 +68,7 @@ class gemm_rcr_bias_broadcast(gemm_rcr_bias):
         self._sanity_check(a, b)
         output_shape = self._infer_shapes(a, b, bias)
         self._extract_epilogue_alignment(output_shape)
-        output = Tensor(output_shape, src_ops={self})
+        output = Tensor(output_shape, src_ops={self}, dtype=a.dtype())
         self._attrs["outputs"] = [output]
         self._attrs["output_accessors"] = [TensorAccessor(output)]
         return output

@@ -18,8 +18,8 @@ Multi level roi_align.
 
 from typing import List
 
-from ....base import Tensor
-from .roi_ops import roi_ops_base
+from aitemplate.compiler.base import Tensor
+from aitemplate.compiler.ops.vision_ops.roi_ops.roi_ops import roi_ops_base
 
 # pylint: disable=C0103
 
@@ -114,7 +114,7 @@ class multi_level_roi_align(roi_ops_base):
         self._set_depth()
         self._extract_exec_path(x)
         output_shape = self._infer_shapes(x)
-        output = Tensor(output_shape, src_ops={self})
+        output = Tensor(output_shape, src_ops={self}, dtype=x._attrs["dtype"])
         self._attrs["outputs"] = [output]
         return output
 

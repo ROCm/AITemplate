@@ -16,6 +16,7 @@
 Common functions/classes for GEMM ops
 """
 import itertools
+import logging
 import math
 import os
 import re
@@ -24,21 +25,35 @@ from dataclasses import dataclass
 from enum import Enum
 from hashlib import sha1
 from operator import itemgetter
-from typing import Any, Dict, List, Union
+from time import sleep
+from typing import Any, Callable, Dict, List, Union
 
 import jinja2
 
-from aitemplate.backend.profiler_runner import ProfileResult
+from aitemplate import backend
+from aitemplate.backend import registry
 
-from .... import backend
-from ....backend import registry
-from ....utils import logger
-from ....utils.alignment import find_max_alignment
-from ...base import DynamicProfileStrategy, ExecItem, IntImm, IntVar, Operator, Tensor
-from ...tensor_accessor import TensorAccessor
-from .cache_entry import GemmQueryEntry, GemmRecordEntry
+from aitemplate.backend.profiler_runner import ProfileResult
+from aitemplate.compiler.base import (
+    DynamicProfileStrategy,
+    ExecItem,
+    IntImm,
+    IntVar,
+    Operator,
+    Tensor,
+)
+from aitemplate.compiler.dtype import is_same_dtype
+from aitemplate.compiler.ops.gemm_universal.cache_entry import (
+    GemmQueryEntry,
+    GemmRecordEntry,
+)
+from aitemplate.compiler.tensor_accessor import TensorAccessor
+from aitemplate.utils import alignment, environ
 
 # pylint: disable=C0103,R1711,W0102,W0221,E1120
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def split_k_result_getter(result):
@@ -153,15 +168,9 @@ def gemm_inverse_key_func(key):
     return [int(x) for x in tmp]
 
 
-def default_align_ab(a, b):
+def default_align_ab(a, b, dtype):
     ab = math.gcd(a, b)
-    if ab % 8 == 0:
-        return 8
-    if ab % 4 == 0:
-        return 4
-    if ab % 2 == 0:
-        return 2
-    return 1
+    return alignment.find_max_alignment(ab, dtype)
 
 
 def _to_list(elem):
@@ -169,6 +178,22 @@ def _to_list(elem):
         return list(elem)
     else:
         return [elem]
+
+
+def _check_with_retries(
+    condition: Callable[[], bool],
+    max_attempts: int = 3,
+    delay_seconds: int = 5,
+) -> bool:
+    """Check a condition with retries."""
+    attempts = 0
+    while True:
+        if condition():
+            return True
+        attempts += 1
+        if attempts >= max_attempts:
+            return False
+        sleep(delay_seconds)
 
 
 class gemm(Operator):
@@ -211,8 +236,8 @@ class gemm(Operator):
         else:
             shape = epilogue_dim._attrs["values"][0]
 
-        self._attrs["epilogue_alignment"] = find_max_alignment(shape)
-        return
+        dtype = self._attrs["inputs"][0].dtype()
+        self._attrs["epilogue_alignment"] = alignment.find_max_alignment(shape, dtype)
 
     def _infer_shapes(self, a: Tensor, b: Tensor):
         raise NotImplementedError("_infer_shapes() is not implemented!")
@@ -297,7 +322,7 @@ class gemm(Operator):
         """
 
         dim_info_dict: Dict[str, List[DimInfo]] = self._extract_dims()
-        dim_dict: Dict[str, IntVar] = {}
+        dim_dict: Dict[str, List[IntVar]] = {}
         for name, dim_infos in dim_info_dict.items():
             dim_info = None
             for d in dim_infos:
@@ -380,11 +405,13 @@ class gemm(Operator):
         generate a filename for a profiler that benchmarks multiple GEMM instances
         """
         target = backend.target.Target.current()
+
         op_type = self._attrs["op"]
         all_op_names = list(self._attrs["op_instance"].keys())
         encoded_str = sha1((";".join(all_op_names)).encode("utf-8")).hexdigest()
-        # we don't use cache
+
         if target.use_dummy_profiling_results():
+            # we don't use cache
             return f"{op_type}_{encoded_str}"
         else:
             cache_ver = target.get_profile_cache_version("gemm")
@@ -398,6 +425,9 @@ class gemm(Operator):
         entry for this gemm instance, we update this gemm op's
         relevant attributes with the cached result and return False.
         """
+        # We are forced to use the cache, so we skip building profilers.
+        if environ.force_profiler_cache():
+            return False
         target = backend.target.Target.current()
 
         build_profiler = True
@@ -425,8 +455,7 @@ class gemm(Operator):
                 )
                 cache_value = target.query_profile_cache("gemm", query.__dict__)
                 if cache_value is not None and not target.force_profile():
-                    logger.info(
-                        __name__,
+                    _LOGGER.info(
                         f'Load profiling result for {self._attrs["name"]} '
                         f"from cache: {cache_value}",
                     )
@@ -458,7 +487,7 @@ class gemm(Operator):
             target=target.name(), op=self._attrs["op"]
         )
         func = registry.get(func_key)
-        func(self._attrs)
+        func(self._attrs, dtype=self._attrs["inputs"][0]._attrs["dtype"])
 
         # init exec path
         self._extract_exec_path(dynamic_profiling_strategy)
@@ -483,14 +512,11 @@ class gemm(Operator):
         filter_func = registry.get(func_key)
         # run compile-time filter
         new_op_instance = OrderedDict(
-            {
-                k: v
-                for k, v in self._attrs["op_instance"].items()
-                if filter_func(k, self._attrs, ab_alignments[0])
-            }
+            (k, v)
+            for k, v in self._attrs["op_instance"].items()
+            if filter_func(k, self._attrs, ab_alignments[0])
         )
-        logger.debug(
-            __name__,
+        _LOGGER.debug(
             f"Filtered profiler kernels for {self._attrs['op']}: reduced the "
             f"number of generated kernels from {len(self._attrs['op_instance'])} "
             f"to {len(new_op_instance)}",
@@ -511,7 +537,7 @@ class gemm(Operator):
                     self._extract_dims(for_profiling=True),
                 )
             profiler_filename = self._get_profiler_filename()
-            logger.info(__name__, f"generating {profiler_filename=}")
+            _LOGGER.info(f"generating {profiler_filename=}")
             return func(
                 self._attrs,
                 workdir,
@@ -523,8 +549,13 @@ class gemm(Operator):
         self, profiler_prefix, profiler_filename, exec_key, fbuild_cmd
     ):
         exe_path = os.path.join(profiler_prefix, profiler_filename)
-        if not os.access(exe_path, os.X_OK):
+        if not _check_with_retries(
+            condition=lambda: os.access(exe_path, os.X_OK),
+            max_attempts=3,
+            delay_seconds=5,
+        ):
             raise RuntimeError("Profiler %s is not executable" % exe_path)
+
         cmd_args = fbuild_cmd(exec_key)
         cmd = [exe_path]
         # mnk
@@ -549,8 +580,7 @@ class gemm(Operator):
         if low_range == 1:
             low_range += 1
         space += list(range(low_range, high_range, 2))
-        logger.debug(
-            __name__,
+        _LOGGER.debug(
             f"profiling split-k for gemm instance M={M}, N={N}, K={K} in {set(space)}",
         )
         return set(space)
@@ -567,14 +597,18 @@ class gemm(Operator):
             # exec_key may contain batch dimension, which we don't care here
             m, n, k = gemm_inverse_key_func(exec_key)[-3:]
             ab_alignment = self._attrs["f_ab_alignment"](m, n, k)
-            # FIXME: for dtype != float16
-            if ab_alignment == 1:
+            if not alignment.valid_alignment(
+                ab_alignment, self._attrs["inputs"][0].dtype()
+            ):
                 raise RuntimeError(
-                    "A / B alignment == 1 is not supported! " f"m: {m}, n: {n}, k: {k}."
+                    f"A / B {ab_alignment=} is not valid! The last dimension of each input tensor needs to be divisible by 2."
+                    f"m: {m}, n: {n}, k: {k}."
                 )
         return ab_alignment
 
-    def _profile_single_workload(self, profiler_prefix, exec_key, profiler_runner):
+    def _profile_single_workload(
+        self, profiler_prefix, exec_key, profiler_runner, force_cache
+    ):
         """
         Schedule profilers for given profiler path and gemm shape (exec_key)
         or get the result from cache
@@ -609,8 +643,7 @@ class gemm(Operator):
         )
         cache_value = target.query_profile_cache("gemm", query.__dict__)
         if cache_value is not None and not target.force_profile():
-            logger.debug(
-                __name__,
+            _LOGGER.debug(
                 f'Load profiling result for {self._attrs["name"]} '
                 f"from cache: {cache_value}",
             )
@@ -618,13 +651,19 @@ class gemm(Operator):
             self._attrs["workspace"] = max(self._attrs["workspace"], cache_value[1])
             self._attrs["split_k"] = cache_value[2]
             return
+        if cache_value is None and force_cache:
+            op_type = self._attrs["op"]
+            raise RuntimeError(
+                "force_cache is enabled but we could not find the following cache ",
+                f"available on device {target._arch=}, {op_type=}, {exec_entry_sha1=}",
+            )
         if target.use_dummy_profiling_results():
             op_type = self._attrs["op"]
             raise Exception(
                 "This is a CI run but we could not find the following cache ",
                 f"available on device {target._arch}\n",
                 f"{op_type} {exec_entry_sha1}.\n",
-                "To bypass, you need to make it available in the db table.",
+                "Please adjust target.select_minimal_algo function.",
             )
         if target.name() == "rocm":
             op_type = self._attrs["op"]
@@ -703,30 +742,33 @@ class gemm(Operator):
             target = backend.target.Target.current()
             # init candidate ops
             func_key = "{target}.{op}.config".format(
-                target=target.name(), op=self._attrs["op"]
+                target=target.name(),
+                op=self._attrs["op"],
             )
             func = registry.get(func_key)
-            func(self._attrs)
+            func(self._attrs, dtype=self._attrs["inputs"][0]._attrs["dtype"])
+        target = backend.target.Target.current()
+        force_cache = environ.force_profiler_cache()
         for wkl in workloads:
-            logger.info(
-                __name__,
+            _LOGGER.info(
                 "Profile: {name}: {wkl}".format(name=self._attrs["name"], wkl=wkl),
             )
-            target = backend.target.Target.current()
             # if in CI just choose minimal configs
             # workspace is a hack just provides 102400 Byte
-            if target.use_dummy_profiling_results():
+            if target.use_dummy_profiling_results() and not force_cache:
                 algo = target.select_minimal_algo(
                     list(self._attrs["op_instance"].keys())
                 )
-                logger.info(__name__, f"Select minimal algo {algo} for CI")
+                _LOGGER.info(f"Select minimal algo {algo} for CI")
                 self._attrs["exec_path"][wkl].algo = algo
                 self._attrs["workspace"] = 102400
             elif self._attrs["exec_path"][wkl].algo != "":
                 # we have cached best algo
                 return
             else:
-                self._profile_single_workload(profiler_prefix, wkl, profiler_runner)
+                self._profile_single_workload(
+                    profiler_prefix, wkl, profiler_runner, force_cache
+                )
 
     def gen_function(self) -> str:
         """Generates the function code for the gemm op for the current target.
@@ -777,6 +819,12 @@ class gemm(Operator):
                     b_shapes
                 )
             )
+        if not is_same_dtype(a.dtype(), b.dtype()):
+            raise RuntimeError(
+                "gemm operand A and B should have the same data type! Current A: {atype}, B: {btype}.".format(
+                    atype=a.dtype(), btype=b.dtype()
+                )
+            )
 
     def __call__(self, a: Tensor, b: Tensor) -> Tensor:
         """Call the gemm op.
@@ -801,7 +849,7 @@ class gemm(Operator):
         self._sanity_check(a, b)
         output_shape = self._infer_shapes(a, b)
         self._extract_epilogue_alignment(output_shape)
-        output = Tensor(output_shape, src_ops={self})
+        output = Tensor(output_shape, src_ops={self}, dtype=a.dtype())
         self._attrs["outputs"] = [output]
         self._attrs["output_accessors"] = [TensorAccessor(output)]
         return output
@@ -868,8 +916,7 @@ class GemmProfilerPostprocessingDelegate:
             func_attrs["workspace"] = max(func_attrs["workspace"], workspace)
             func_attrs["split_k"] = split_k
 
-            logger.info(
-                __name__,
+            _LOGGER.info(
                 f"Profiler ({profiler_filename} {exec_key}) selected kernel: "
                 f"{best_algo=} {workspace=} {split_k=}",
             )
@@ -897,4 +944,4 @@ class GemmProfilerPostprocessingDelegate:
             try:
                 target.insert_profile_cache("gemm", cache_record.__dict__)
             except Exception as e:
-                logger.warning(__name__, e)
+                _LOGGER.warning(e)

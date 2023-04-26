@@ -15,16 +15,21 @@
 """
 CUDA tensor ops module init
 """
-from . import (
+from aitemplate.backend.cuda.tensor import (
     argmax,
     batch_gather,
     concatenate,
     concatenate_tanh,
     dynamic_slice,
     expand,
+    full,
     gather,
+    jagged_to_padded_dense,
+    masked_select,
+    padded_dense_to_jagged,
     permute,
     permute021,
+    permute0213,
     permute102,
     permute210,
     slice_reshape_scatter,
@@ -40,14 +45,18 @@ __all__ = [
     "concatenate_tanh",
     "dynamic_slice",
     "expand",
+    "full",
     "gather",
+    "jagged_to_padded_dense",
+    "masked_select",
+    "padded_dense_to_jagged",
     "permute",
     "permute021",
+    "permute0213",
     "permute102",
     "permute210",
     "slice_reshape_scatter",
     "slice_scatter",
     "split",
-    "argmax",
     "topk",
 ]

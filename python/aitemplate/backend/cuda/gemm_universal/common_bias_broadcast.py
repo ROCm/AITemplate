@@ -22,11 +22,11 @@ from functools import partial
 
 import jinja2
 
-from ...backend_spec import CUDASpec
-from ...common import gemm_common
-from ...target import Target
+from aitemplate.backend.backend_spec import CUDASpec
+from aitemplate.backend.common import gemm_common
 
-from . import common, gemm_rcr
+from aitemplate.backend.cuda.gemm_universal import common, gemm_rcr
+from aitemplate.backend.target import Target
 
 # pylint: disable=C0103,C0415,W0613,C0301,R1705,R1703
 
@@ -35,9 +35,9 @@ from . import common, gemm_rcr
 GEMM_UNIVERSAL_WITH_BROADCAST_TEMPLATE = jinja2.Template(
     """
     cutlass::gemm::device::GemmUniversalWithBroadcast<
-        cutlass::half_t, {{layout.cutlass_layout_a}},
-        cutlass::half_t, {{layout.cutlass_layout_b}},
-        cutlass::half_t, {{layout.cutlass_layout_c}},
+        {{elem_type}}, {{layout.cutlass_layout_a}},
+        {{elem_type}}, {{layout.cutlass_layout_b}},
+        {{elem_type}}, {{layout.cutlass_layout_c}},
         {{acc_type}},
         cutlass::arch::OpClassTensorOp,
         {{arch}},
@@ -45,8 +45,8 @@ GEMM_UNIVERSAL_WITH_BROADCAST_TEMPLATE = jinja2.Template(
         {{warp_shape}},
         {{instruction_shape}},
         {{epilogue_functor}}<
-            cutlass::half_t, {{acc_type}}, {{acc_type}},
-            cutlass::half_t, {{epilogue_vector_length}},
+            {{elem_type}}, {{acc_type}}, {{acc_type}},
+            {{elem_type}}, {{epilogue_vector_length}},
             {{unary_op1}}, {{binary_op1}}, {{unary_op2}}
 {% if has_d1 %}
             , {{binary_op2}}
@@ -63,86 +63,82 @@ GEMM_UNIVERSAL_WITH_BROADCAST_TEMPLATE = jinja2.Template(
 # For func codegen.
 PROBLEM_ARGS_TEMPLATE = jinja2.Template(
     """
-    cutlass::gemm::GemmUniversalMode::kGemm,
-    { {{layout.m}}, {{layout.n}}, {{layout.k}} },
+    cutlass::gemm::GemmUniversalMode::kGemm,                 // GemmUniversalMode mode
+    { {{layout.m}}, {{layout.n}}, {{layout.k}} },            // GemmCoord problem_size
 {% if support_split_k %}
-    split_k,
+    split_k,                                                 // int batch_count
 {% else %}
-    1,
+    1,                                                       // int batch_count
 {% endif %}
-    {ElementComputeEpilogue(1), ElementComputeEpilogue(1)},
-    ({{elem_input_type}}*)(a_ptr) + input_a_offset,
-    ({{elem_input_type}}*)(b_ptr) + input_b_offset,
-    ({{elem_output_type}}*)(d0_ptr),
+    {ElementComputeEpilogue(1), ElementComputeEpilogue(1)},  // typename EpilogueOutputOp::Params epilogue
+    ({{elem_input_type}}*)(a_ptr) + input_a_offset,          // void const * ptr_A
+    ({{elem_input_type}}*)(b_ptr) + input_b_offset,          // void const * ptr_B
+    ({{elem_output_type}}*)(d0_ptr),                         // void const * ptr_C1
 {% if has_d1 %}
-    ({{elem_output_type}}*)(d1_ptr),
-{% else %}
-    nullptr,
+    ({{elem_output_type}}*)(d1_ptr),                         // void const * ptr_C2
 {% endif %}
-    ({{elem_output_type}}*) (c_ptr) + output_offset,
-    ({{elem_input_type}}*) (bias_ptr),
-    nullptr,
-    /*batch_stride_A*/ input_a_batch_stride,
-    /*batch_stride_B*/ input_b_batch_stride,
-    /*batch_stride_C1*/ 0,
-    /*batch_stride_C2*/ 0,
-    /*batch_stride_D*/ 0,
-    /*batch_stride_Vector*/ 0,
-    /*batch_stride_Tensor*/ 0,
-    input_a_stride,
-    input_b_stride,
-    {{layout.stride_c}},
+    ({{elem_output_type}}*) (c_ptr) + output_offset,         // void * ptr_D
+    ({{elem_input_type}}*) (bias_ptr),                       // void * ptr_Vector
+    nullptr,                                                 // void * ptr_Tensor
+    input_a_batch_stride,                                    // int64_t batch_stride_A
+    input_b_batch_stride,                                    // int64_t batch_stride_B
+    0,                                                       // int64_t batch_stride_C1
 {% if has_d1 %}
-    {{layout.stride_c}},
-{% else %}
-    0,
+    0,                                                       // int64_t batch_stride_C2
 {% endif %}
-    output_stride,
-    /*ldr*/ 0,
-    /*/ldt*/ 0
+    0,                                                       // int64_t batch_stride_D
+    0,                                                       // int64_t batch_stride_Vector
+    0,                                                       // int64_t batch_stride_Tensor
+    input_a_stride,                                          // typename LayoutA::Stride::Index lda
+    input_b_stride,                                          // typename LayoutB::Stride::Index ldb
+    {{layout.stride_c}},                                     // typename LayoutC::Stride::Index ldc1
+{% if has_d1 %}
+    {{layout.stride_c}},                                     // typename LayoutC::Stride::Index ldc2
+{% endif %}
+    output_stride,                                           // typename LayoutC::Stride::Index ldd
+    0,                                                       // typename LayoutC::Stride::Index ldr
+    0,                                                       // typename LayoutC::Stride::Index ldt
 """
 )
 
 # for profiler, no need to include TensorAccessor
 PROFILER_PROBLEM_ARGS_TEMPLATE = jinja2.Template(
     """
-    cutlass::gemm::GemmUniversalMode::kGemm,
-    { {{layout.m}}, {{layout.n}}, {{layout.k}} },
+    cutlass::gemm::GemmUniversalMode::kGemm,                 // GemmUniversalMode mode
+    { {{layout.m}}, {{layout.n}}, {{layout.k}} },            // GemmCoord problem_size
 {% if support_split_k %}
-    split_k,
+    split_k,                                                 // int batch_count
 {% else %}
-    1,
+    1,                                                       // int batch_count
 {% endif %}
-    {ElementComputeEpilogue(1), ElementComputeEpilogue(1)},
-    ({{elem_input_type}}*) a_ptr,
-    ({{elem_input_type}}*) b_ptr,
-    ({{elem_output_type}}*) d0_ptr,
+    {ElementComputeEpilogue(1), ElementComputeEpilogue(1)},  // typename EpilogueOutputOp::Params epilogue
+    ({{elem_input_type}}*) a_ptr,                            // void const * ptr_A
+    ({{elem_input_type}}*) b_ptr,                            // void const * ptr_B
+    ({{elem_output_type}}*) d0_ptr,                          // void const * ptr_C1
 {% if has_d1 %}
-    ({{elem_output_type}}*) d1_ptr,
-{% else %}
-    nullptr,
+    ({{elem_output_type}}*) d1_ptr,                          // void const * ptr_C2
 {% endif %}
-    ({{elem_output_type}}*) (c_ptr) + output_offset,
-    ({{elem_input_type}}*) bias_ptr,
-    nullptr,
-    /*batch_stride_A*/ 0,
-    /*batch_stride_B*/ 0,
-    /*batch_stride_C1*/ 0,
-    /*batch_stride_C2*/ 0,
-    /*batch_stride_D*/ 0,
-    /*batch_stride_Vector*/ 0,
-    /*batch_stride_Tensor*/ 0,
-    {{layout.stride_a}},
-    {{layout.stride_b}},
-    {{layout.stride_c}},
+    ({{elem_output_type}}*) (c_ptr) + output_offset,         // void * ptr_D
+    ({{elem_input_type}}*) bias_ptr,                         // void * ptr_Vector
+    nullptr,                                                 // void * ptr_Tensor
+    0,                                                       // int64_t batch_stride_A
+    0,                                                       // int64_t batch_stride_B
+    0,                                                       // int64_t batch_stride_C1
 {% if has_d1 %}
-    {{layout.stride_c}},
-{% else %}
-    0,
+    0,                                                       // int64_t batch_stride_C2
 {% endif %}
-    output_stride,
-    /*ldr*/ 0,
-    /*/ldt*/ 0
+    0,                                                       // int64_t batch_stride_D
+    0,                                                       // int64_t batch_stride_Vector
+    0,                                                       // int64_t batch_stride_Tensor
+    {{layout.stride_a}},                                     // typename LayoutA::Stride::Index lda
+    {{layout.stride_b}},                                     // typename LayoutA::Stride::Index ldb
+    {{layout.stride_c}},                                     // typename LayoutA::Stride::Index ldc1
+{% if has_d1 %}
+    {{layout.stride_c}},                                     // typename LayoutA::Stride::Index ldc2
+{% endif %}
+    output_stride,                                           // typename LayoutA::Stride::Index ldd
+    0,                                                       // typename LayoutA::Stride::Index ldr
+    0,                                                       // typename LayoutA::Stride::Index ldt
 """
 )
 
@@ -153,13 +149,16 @@ SRC_TEMPLATE = jinja2.Template(
 #include <random>
 #include <vector>
 
+#include <cuda_bf16.h>
 #include "cutlass/cutlass.h"
-#include "cutlass/epilogue/thread/linear_combination_residual_block_v2.h"
+#include "cutlass/epilogue/thread/linear_combination_residual_block.h"
 #include "cutlass/gemm/device/gemm_universal_with_broadcast.h"
 #include "cutlass/util/host_tensor.h"
 #include "cutlass/util/reference/host/tensor_fill.h"
 #include "cutlass/util/reference/device/tensor_fill.h"
 #include "cutlass/util/device_memory.h"
+
+using bfloat16 = nv_bfloat16;
 
 #define CUTLASS_CHECK(status)                                                         \\
   {                                                                                   \\
@@ -319,13 +318,15 @@ TENSOR_DECL_TEMPLATE = jinja2.Template(
   int64_t c_ptr_sz = c_dim0 * c_dim1;
   // The value 1 is used to force ptr_max_sz to be non-zero
   int64_t ptr_max_sz = std::max<int64_t>({1, a_ptr_sz, b_ptr_sz, c_ptr_sz});
-  // TODO: special pool size for A100 L2 cache 40M
-  // need to tune it for other devices
-  int64_t mem_pool_sz = std::max(2,  std::min(64, int((1 << 25) / ptr_max_sz)));
+  size_t one_copy_sz = a_ptr_sz + b_ptr_sz + c_ptr_sz + c_dim1 + c_ptr_sz;
+{% if has_d1 %}
+  one_copy_sz += c_ptr_sz;
+{%endif%}
+  int64_t mem_pool_sz = memory_pool->ComputeMemPoolSize(one_copy_sz, ptr_max_sz);
 
   memory_pool->AllocateTensor(a_ptr_sz, mem_pool_sz);  // a_ptr: index 0
   memory_pool->AllocateTensor(b_ptr_sz, mem_pool_sz);  // b_ptr: index 1
-  memory_pool->AllocateTensor(c_ptr_sz, mem_pool_sz);  // c_ptr: index 2
+  memory_pool->AllocateTensor(c_ptr_sz, mem_pool_sz, /*is_output*/true);  // c_ptr: index 2
   memory_pool->AllocateTensor(c_dim1, mem_pool_sz);  // bias_ptr: index 3
   memory_pool->AllocateTensor(c_ptr_sz, mem_pool_sz);  // d0 ptr: index 4
 {% if has_d1 %}
@@ -348,6 +349,7 @@ def gemm_bias_broadcast_instance(
     binary_op1,
     binary_op2,
     unary_op2,
+    elem_type,
 ):
     """
     adjust gemm instance with respect to input_accessors, layout and epilogue ops
@@ -363,6 +365,7 @@ def gemm_bias_broadcast_instance(
     if (
         "use_fp16_acc" in Target.current()._kwargs
         and Target.current()._kwargs["use_fp16_acc"]
+        and elem_type == "cutlass::half_t"
     ):
         acc_type = "cutlass::half_t"
     else:
@@ -384,6 +387,7 @@ def gemm_bias_broadcast_instance(
             alignment_b=gemm_universal_params[18],
             layout=layout,
             acc_type=acc_type,
+            elem_type=elem_type,
             has_d1=(binary_op2 is not None),
         )
     )
@@ -466,6 +470,7 @@ def gen_profiler(
                 binary_op1=binary_op1,
                 binary_op2=binary_op2,
                 unary_op2=unary_op2,
+                elem_type=elem_input_type,
             ),
         )
         config_name = common.extract_config_name(config)
@@ -480,20 +485,11 @@ def gen_profiler(
             gemm_op=gemm_op,
             gemm_op_name=op_name,
             func_name=f"benchmark_{function_name}",
-            a_ptr="memory_pool->RequestTensorByIdx(0)",
-            b_ptr="memory_pool->RequestTensorByIdx(1)",
-            c_ptr="memory_pool->RequestTensorByIdx(2)",
-            d_ptr="memory_pool->RequestTensorByIdx(4)",
-            d1_ptr="memory_pool->RequestTensorByIdx(5)",
-            bias_ptr="memory_pool->RequestTensorByIdx(3)",
             adims=adims,
             bdims=bdims,
             cdims=cdims,
             support_split_k=support_split_k,
             split_k="split_k",
-            has_bias=True,
-            has_d=True,
-            has_d1=has_d1,
         )
         instances.append(instance)
         benchmark_instances.append(benchmark_instance)
@@ -520,12 +516,12 @@ def gen_profiler(
     func_call = FUNC_CALL_TEMPLATE.render(
         is_profiler=True,
         func_name="gemm",
-        a_ptr="a_ptr",
-        b_ptr="b_ptr",
-        c_ptr="c_ptr",
-        d0_ptr="d_ptr",
-        d1_ptr="d1_ptr",
-        bias_ptr="bias_ptr",
+        a_ptr="memory_pool->RequestTensorByIdx(0)",
+        b_ptr="memory_pool->RequestTensorByIdx(1)",
+        c_ptr="memory_pool->RequestTensorByIdx(2)",
+        d0_ptr="memory_pool->RequestTensorByIdx(4)",
+        d1_ptr="memory_pool->RequestTensorByIdx(5)",
+        bias_ptr="memory_pool->RequestTensorByIdx(3)",
         adims=benchmark_adims,
         bdims=benchmark_bdims,
         cdims=benchmark_cdims,
@@ -606,6 +602,7 @@ def gen_function(
             binary_op1=binary_op1,
             binary_op2=binary_op2,
             unary_op2=unary_op2,
+            elem_type=elem_input_type,
         ),
         support_split_k=support_split_k,
         input_addr_calculator=input_addr_calculator,

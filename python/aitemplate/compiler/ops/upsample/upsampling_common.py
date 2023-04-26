@@ -23,10 +23,10 @@ from typing import List
 
 import jinja2
 
-from .... import backend
-from ....backend import registry
-from ....utils import shape_utils
-from ...base import Operator, Tensor
+from aitemplate import backend
+from aitemplate.backend import registry
+from aitemplate.compiler.base import Operator, Tensor
+from aitemplate.utils import shape_utils
 
 # pylint: disable=C0103,W0221,R1732,W0613
 logging.basicConfig(level=logging.INFO)
@@ -152,7 +152,7 @@ class upsampling2d_base(Operator):
         self._set_depth()
         self._extract_exec_path(x)
         output_shape = self._infer_shapes(x)
-        output = Tensor(output_shape, src_ops={self})
+        output = Tensor(output_shape, src_ops={self}, dtype=x._attrs["dtype"])
         self._attrs["outputs"] = [output]
         return output
 

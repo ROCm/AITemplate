@@ -20,10 +20,10 @@ from typing import List
 
 import jinja2
 
-from .... import backend
-from ....backend import registry
-from ....utils import shape_utils
-from ...base import Operator, Tensor
+from aitemplate import backend
+from aitemplate.backend import registry
+from aitemplate.compiler.base import Operator, Tensor
+from aitemplate.utils import shape_utils
 
 # pylint: disable=C0103,W0221
 
@@ -90,7 +90,7 @@ class nhwc_pad_common(Operator):
         self._attrs["inputs"] = [x]
         self._set_depth()
         output_shape = self._infer_shapes(x)
-        output = Tensor(output_shape, src_ops={self})
+        output = Tensor(output_shape, src_ops={self}, dtype=x.dtype())
         self._attrs["outputs"] = [output]
         return output
 

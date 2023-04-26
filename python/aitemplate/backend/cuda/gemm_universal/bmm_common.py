@@ -19,9 +19,9 @@ from dataclasses import dataclass
 
 import jinja2
 
-from ...backend_spec import CUDASpec
-from ...common import gemm_common
-from . import common
+from aitemplate.backend.backend_spec import CUDASpec
+from aitemplate.backend.common import gemm_common
+from aitemplate.backend.cuda.gemm_universal import common
 
 # pylint: disable=C0103,C0415,W0613,C0301,R1705,R1703
 
@@ -135,13 +135,18 @@ TENSOR_DECL_TEMPLATE = jinja2.Template(
 
   // The value 1 is used to force ptr_max_sz to be non-zero
   int64_t ptr_max_sz = std::max<int64_t>({1, a_ptr_sz, b_ptr_sz, c_ptr_sz});
-  // TODO: special pool size for A100 L2 cache 40M
-  // need to tune it for other devices
-  int64_t mem_pool_sz = std::max(2,  std::min(64, int((1 << 25) / ptr_max_sz)));
+  size_t one_copy_sz = a_ptr_sz + b_ptr_sz + c_ptr_sz;
+{% if has_bias %}
+  one_copy_sz += c_dim2;
+{%endif%}
+{% if has_d %}
+  one_copy_sz += c_ptr_sz;
+{%endif%}
+  int64_t mem_pool_sz = memory_pool->ComputeMemPoolSize(one_copy_sz, ptr_max_sz);
 
   memory_pool->AllocateTensor(a_ptr_sz, mem_pool_sz);  // a_ptr: index 0
   memory_pool->AllocateTensor(b_ptr_sz, mem_pool_sz);  // b_ptr: index 1
-  memory_pool->AllocateTensor(c_ptr_sz, mem_pool_sz);  // c_ptr: index 2
+  memory_pool->AllocateTensor(c_ptr_sz, mem_pool_sz, /*is_output*/true);  // c_ptr: index 2
 {% if has_bias %}
   memory_pool->AllocateTensor(c_dim2, mem_pool_sz);  // bias_ptr: index 3
 {% endif %}
@@ -189,22 +194,22 @@ def _update_stride_info(mm_info, a_shapes, b_shapes, bias_shapes=None):
 
 PROBLEM_ARGS_TEMPLATE = jinja2.Template(
     """
-    cutlass::gemm::GemmUniversalMode::kBatched,
-    {{mm_info.problem_size}},
-    {{mm_info.batch_size}},
-    {ElementComputeEpilogue({{mm_info.alpha_value}}), ElementComputeEpilogue({{mm_info.beta_value}})},
-    {{mm_info.a_ptr}},
-    {{mm_info.b_ptr}},
-    {{mm_info.bias_ptr}},
-    {{mm_info.c_ptr}},
-    {{mm_info.a_batch_stride}},
-    {{mm_info.b_batch_stride}},
-    {{mm_info.bias_batch_stride}},
-    {{mm_info.c_batch_stride}},
-    {{mm_info.lda}},
-    {{mm_info.ldb}},
-    {{mm_info.ldbias}},
-    {{mm_info.ldc}}
+    cutlass::gemm::GemmUniversalMode::kBatched,                                                         // GemmUniversalMode mode
+    {{mm_info.problem_size}},                                                                           // GemmCoord problem_size
+    {{mm_info.batch_size}},                                                                             // int batch_count
+    {ElementComputeEpilogue({{mm_info.alpha_value}}), ElementComputeEpilogue({{mm_info.beta_value}})},  // typename EpilogueOutputOp::Params epilogue
+    {{mm_info.a_ptr}},                                                                                  // void const * ptr_A
+    {{mm_info.b_ptr}},                                                                                  // void const * ptr_B
+    {{mm_info.bias_ptr}},                                                                               // void const * ptr_C
+    {{mm_info.c_ptr}},                                                                                  // void * ptr_D
+    {{mm_info.a_batch_stride}},                                                                         // int64_t batch_stride_A
+    {{mm_info.b_batch_stride}},                                                                         // int64_t batch_stride_B
+    {{mm_info.bias_batch_stride}},                                                                      // int64_t batch_stride_C
+    {{mm_info.c_batch_stride}},                                                                         // int64_t batch_stride_D
+    {{mm_info.lda}},                                                                                    // typename LayoutA::Stride::LongIndex lda
+    {{mm_info.ldb}},                                                                                    // typename LayoutB::Stride::LongIndex ldb
+    {{mm_info.ldbias}},                                                                                 // typename LayoutC::Stride::LongIndex ldc
+    {{mm_info.ldc}},                                                                                    // typename LayoutC::Stride::LongIndex ldd
 """
 )
 
@@ -231,6 +236,139 @@ def reverse_dim_info_mapping(dim_info_dict, source, tensor_idx):
         )
 
     return ret
+
+
+def get_default_problem_info(default_problem_args, **kwargs):
+    """Return the default problem args"""
+    problem_args = default_problem_args.copy()
+    for k, v in kwargs.items():
+        problem_args[k] = v
+
+    bmm_problem_info = Bmm_problem_info(**problem_args)
+    return bmm_problem_info
+
+
+def make_function_strided_args(
+    func_attrs,
+    dim_info_dict,
+    default_mm_info,
+    is_permute=False,
+):
+    """
+    Return a tuple of (problem_args, input_addr_calculator, output_addr_calculator)
+    """
+    backend_spec = CUDASpec()
+    elem_input_type = backend_spec.dtype_to_lib_type(
+        func_attrs["inputs"][0]._attrs["dtype"]
+    )
+    elem_output_type = backend_spec.dtype_to_lib_type(
+        func_attrs["outputs"][0]._attrs["dtype"]
+    )
+
+    input_a_batch_stride_dim = default_mm_info.a_batch_stride
+    input_a_stride_lda_dim = default_mm_info.lda
+    input_a_offset = 0
+    input_b_batch_stride_dim = default_mm_info.b_batch_stride
+    input_b_stride_ldb_dim = default_mm_info.ldb
+    input_b_offset = 0
+
+    has_bias = len(func_attrs["inputs"]) == 3
+
+    if "input_accessors" in func_attrs:
+        input_a_accessor = func_attrs["input_accessors"][0]
+        input_b_accessor = func_attrs["input_accessors"][1]
+
+        if input_a_accessor.is_from_strided_tensor:
+            input_a_offset = input_a_accessor.offset
+            if not input_a_accessor.is_contiguous:
+                a_dims = reverse_dim_info_mapping(
+                    dim_info_dict, gemm_common.Source.INPUT, 0
+                )
+
+                input_a_batch_stride_dim = input_a_accessor.gen_stride_str(0, a_dims)
+                input_a_stride_lda_dim = input_a_accessor.stride(1)
+
+        if input_b_accessor.is_from_strided_tensor:
+            input_b_offset = input_b_accessor.offset
+            if not input_b_accessor.is_contiguous:
+                b_dims = reverse_dim_info_mapping(
+                    dim_info_dict, gemm_common.Source.INPUT, 1
+                )
+                input_b_batch_stride_dim = input_b_accessor.gen_stride_str(0, b_dims)
+                input_b_stride_ldb_dim = input_b_accessor.stride(1)
+
+        if has_bias:
+            # FIXME: we don't suppor strided bias yet. Will enable it once
+            # we support it.
+            input_bias_accessor = func_attrs["input_accessors"][2]
+            assert (
+                not input_bias_accessor.is_from_strided_tensor
+            ), f'strided bias is not supported for op {func_attrs["name"]}'
+
+    input_addr_calculator = common.INPUT_ADDR_CALCULATOR.render(
+        input_a_batch_stride_dim=input_a_batch_stride_dim,
+        input_a_stride_dim=input_a_stride_lda_dim,
+        input_a_offset_val=input_a_offset,
+        input_b_batch_stride_dim=input_b_batch_stride_dim,
+        input_b_stride_dim=input_b_stride_ldb_dim,
+        input_b_offset_val=input_b_offset,
+    )
+
+    # bmm_permute requires a slightly different c_batch_stride and
+    # output_batch_stride_dim values
+    if is_permute:
+        output_batch_stride_dim = default_mm_info.bias_batch_stride
+        c_batch_stride = default_mm_info.c_batch_stride
+    else:
+        output_batch_stride_dim = default_mm_info.c_batch_stride
+        c_batch_stride = "output_batch_stride"
+    output_stride_ldc_dim = default_mm_info.ldc
+    output_offset = 0
+
+    if "output_accessors" in func_attrs:
+        output_accessor = func_attrs["output_accessors"][0]
+        if output_accessor.is_from_strided_tensor:
+            output_offset = output_accessor.offset
+            if not output_accessor.is_contiguous:
+                c_dims = reverse_dim_info_mapping(
+                    dim_info_dict, gemm_common.Source.OUTPUT, 0
+                )
+                output_batch_stride_dim = output_accessor.gen_stride_str(0, c_dims)
+                output_stride_ldc_dim = output_accessor.stride(1)
+
+    output_addr_calculator = OUTPUT_ADDR_CALCULATOR.render(
+        output_batch_stride_dim=output_batch_stride_dim,
+        output_stride_dim=output_stride_ldc_dim,
+        output_offset_val=output_offset,
+    )
+
+    bmm_problem_info = Bmm_problem_info(
+        alpha_value=default_mm_info.alpha_value,
+        beta_value=default_mm_info.beta_value,
+        a_ptr=f"({elem_input_type}*)({default_mm_info.a_ptr}) + input_a_offset",
+        b_ptr=f"({elem_input_type}*)({default_mm_info.b_ptr}) + input_b_offset",
+        bias_ptr=f"({elem_output_type}*)({default_mm_info.bias_ptr})",
+        c_ptr=f"({elem_output_type}*)({default_mm_info.c_ptr}) + output_offset",
+        a_batch_stride="input_a_batch_stride",
+        b_batch_stride="input_b_batch_stride",
+        bias_batch_stride=f"{default_mm_info.bias_batch_stride}",
+        c_batch_stride=c_batch_stride,
+        lda="input_a_stride",
+        ldb="input_b_stride",
+        ldbias=f"{default_mm_info.ldbias}",
+        ldc="output_stride",
+    )
+    a_shapes = func_attrs["input_accessors"][0].original_shapes
+    b_shapes = func_attrs["input_accessors"][1].original_shapes
+    d_shapes = None
+    if has_bias:
+        d_shapes = func_attrs["input_accessors"][2].original_shapes
+    _update_stride_info(bmm_problem_info, a_shapes, b_shapes, d_shapes)
+
+    problem_args = PROBLEM_ARGS_TEMPLATE.render(
+        mm_info=bmm_problem_info,
+    )
+    return (problem_args, input_addr_calculator, output_addr_calculator)
 
 
 def gen_profiler(
@@ -295,13 +433,6 @@ def gen_profiler(
             gemm_op=gemm_op,
             gemm_op_name=op_name,
             func_name=f"benchmark_{function_name}",
-            a_ptr="memory_pool->RequestTensorByIdx(0)",
-            b_ptr="memory_pool->RequestTensorByIdx(1)",
-            has_bias=has_bias,
-            bias_ptr=bias_ptr_arg,
-            c_ptr="memory_pool->RequestTensorByIdx(2)",
-            d_ptr="memory_pool->RequestTensorByIdx(%d)" % (4 if has_bias else 3),
-            has_d=has_d,
             adims=a_dims_ptr,
             bdims=b_dims_ptr,
             cdims=c_dims_ptr,
@@ -326,12 +457,12 @@ def gen_profiler(
     func_call = FUNC_CALL_TEMPLATE.render(
         is_profiler=True,
         func_name=function_name,
-        a_ptr="a_ptr",
-        b_ptr="b_ptr",
+        a_ptr="memory_pool->RequestTensorByIdx(0)",
+        b_ptr="memory_pool->RequestTensorByIdx(1)",
         has_bias=has_bias,
-        bias_ptr="bias_ptr",
-        c_ptr="c_ptr",
-        d_ptr="d_ptr",
+        bias_ptr=bias_ptr_arg,
+        c_ptr="memory_pool->RequestTensorByIdx(2)",
+        d_ptr="memory_pool->RequestTensorByIdx(%d)" % (4 if has_bias else 3),
         has_d=has_d,
         a_dims_ptr=benchmark_adims,
         b_dims_ptr=benchmark_bdims,
@@ -364,6 +495,45 @@ def gen_profiler(
     common.add_profiler(file_pairs, workdir, op_type, profiler_filename, code)
     # build
     return common.build_profiler(file_pairs)
+
+
+def default_gen_profiler(
+    func_attrs,
+    workdir,
+    profiler_filename,
+    dim_info_dict,
+    default_problem_args,
+):
+    """default function for generating bmm profilers"""
+    a_dims = reverse_dim_info_mapping(dim_info_dict, gemm_common.Source.INPUT, 0)
+    b_dims = reverse_dim_info_mapping(dim_info_dict, gemm_common.Source.INPUT, 1)
+    c_dims = reverse_dim_info_mapping(dim_info_dict, gemm_common.Source.OUTPUT, 0)
+
+    args_parser = ARGS_PARSER_TEMPLATE.render(
+        a_dims=a_dims, b_dims=b_dims, c_dims=c_dims
+    )
+
+    default_mm_info = get_default_problem_info(
+        default_problem_args,
+        alpha_value=func_attrs.get("alpha", 1),
+    )
+    a_shapes = func_attrs["input_accessors"][0].original_shapes
+    b_shapes = func_attrs["input_accessors"][1].original_shapes
+    _update_stride_info(default_mm_info, a_shapes, b_shapes)
+
+    problem_args = PROBLEM_ARGS_TEMPLATE.render(
+        mm_info=default_mm_info,
+    )
+
+    return gen_profiler(
+        func_attrs,
+        workdir,
+        profiler_filename,
+        dim_info_dict,
+        common.SRC_TEMPLATE,
+        problem_args,
+        args_parser,
+    )
 
 
 def gen_function_decl(func_attrs):

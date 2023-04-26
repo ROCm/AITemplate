@@ -15,15 +15,19 @@
 """
 Codegen functions for group_gemm_rcr_bias.
 """
-from ... import registry
-from . import common, group_common_bias, group_gemm_rcr
+from aitemplate.backend import registry
+from aitemplate.backend.cuda.gemm_universal import (
+    common,
+    group_common_bias,
+    group_gemm_rcr,
+)
 
 # pylint: disable=C0103,C0415,W0613,C0301,R1705,R1703
 
 
 @registry.reg("cuda.group_gemm_rcr_bias.config")
-def group_rcr_config(func_attrs, dtype="float16"):
-    group_gemm_rcr.group_rcr_config(func_attrs, dtype)
+def group_rcr_config(func_attrs):
+    group_gemm_rcr.group_rcr_config(func_attrs)
 
 
 @registry.reg("cuda.group_gemm_rcr_bias.gen_profiler")
@@ -36,12 +40,12 @@ def gen_profiler(func_attrs, workdir, profiler_filename, shape_template):
 @registry.reg("cuda.group_gemm_rcr_bias.gen_function")
 def gen_function(
     func_attrs,
-    exec_cond_remplate,
+    exec_cond_template,
     shape_eval_template,
 ):
     return group_common_bias.gen_function(
         func_attrs,
-        exec_cond_remplate,
+        exec_cond_template,
         shape_eval_template,
     )
 
