@@ -15,7 +15,7 @@
 # ROCM Docker Image for AITemplate
 FROM ubuntu:20.04
 
-ARG ROCMVERSION=5.4.2
+ARG ROCMVERSION=5.4.3
 
 RUN set -xe
 
@@ -95,7 +95,20 @@ RUN bash /Install/install_test_dep.sh
 RUN bash /Install/install_doc_dep.sh
 
 # Install Pytorch
-RUN pip3 install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/rocm5.1.1
+RUN pip3 install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/rocm5.4.2
+
+# Install some useful python packages
+RUN pip3 install --upgrade pip
+
+RUN pip3 install transformers click sympy recordtype parameterized einops jinja2
+RUN pip3 install diffusers==0.11.1 accelerate
+
+# Install packages for processing the performance results
+RUN pip3 install sqlalchemy==1.4.46
+RUN pip3 install pymysql pandas setuptools-rust sshtunnel
+
+# Install lint packages
+RUN pip3 install ufmt==2.0.1 click==8.1.3 black==22.12.0 flake8==5.0.4
 
 # for detection
 RUN DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get -y install tzdata
@@ -113,3 +126,12 @@ ADD ./static /AITemplate/static
 ADD ./licenses /AITemplate/licenses
 ADD ./docker/install/install_ait.sh /AITemplate/
 RUN bash /AITemplate/install_ait.sh
+
+# Create a folder for Hugging Face cache
+RUN mkdir /.aitemplate && chmod a+rw /.aitemplate
+RUN mkdir /.cache && chmod a+rw /.cache
+WORKDIR "/.cache"
+RUN mkdir huggingface && chmod a+rw huggingface
+WORKDIR "/.cache/huggingface"
+RUN mkdir hub && chmod a+rw hub
+WORKDIR /
