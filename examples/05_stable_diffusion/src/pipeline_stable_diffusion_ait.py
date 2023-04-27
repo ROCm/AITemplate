@@ -23,16 +23,17 @@ from aitemplate.compiler import Model
 
 from diffusers import (
     AutoencoderKL,
-    DDIMScheduler,
-    DPMSolverMultistepScheduler,
-    EulerAncestralDiscreteScheduler,
-    EulerDiscreteScheduler,
-    LMSDiscreteScheduler,
-    PNDMScheduler,
+    # DDIMScheduler,
+    # DPMSolverMultistepScheduler,
+    # EulerAncestralDiscreteScheduler,
+    # EulerDiscreteScheduler,
+    # LMSDiscreteScheduler,
+    # PNDMScheduler,
     StableDiffusionPipeline,
     UNet2DConditionModel,
 )
 
+from .utils import *
 from diffusers.pipelines.stable_diffusion import (
     StableDiffusionPipelineOutput,
     StableDiffusionSafetyChecker,
@@ -76,12 +77,12 @@ class StableDiffusionAITPipeline(StableDiffusionPipeline):
         tokenizer: CLIPTokenizer,
         unet: UNet2DConditionModel,
         scheduler: Union[
-            DDIMScheduler,
-            PNDMScheduler,
+            # DDIMScheduler,
+            # PNDMScheduler,
             LMSDiscreteScheduler,
-            EulerDiscreteScheduler,
-            EulerAncestralDiscreteScheduler,
-            DPMSolverMultistepScheduler,
+            # EulerDiscreteScheduler,
+            # EulerAncestralDiscreteScheduler,
+            # DPMSolverMultistepScheduler,
         ],
         safety_checker: StableDiffusionSafetyChecker,
         feature_extractor: CLIPFeatureExtractor,
@@ -165,6 +166,20 @@ class StableDiffusionAITPipeline(StableDiffusionPipeline):
         vae_out = ys[0].permute((0, 3, 1, 2)).float()
         return vae_out
 
+    def loadResources(self):
+        # Pre-compute latent input scales and linear multistep coefficients
+        self.denoising_steps = 50
+        self.scheduler.set_timesteps(self.denoising_steps)
+        self.scheduler.configure()
+    
+    def initialize_latents(self, batch_size, unet_channels, latent_height, latent_width):
+        latents_dtype = torch.float32 # text_embeddings.dtype
+        latents_shape = (batch_size, unet_channels, latent_height, latent_width)
+        latents = torch.randn(latents_shape, device=self.device, dtype=latents_dtype, generator=self.generator)
+        # Scale the initial noise by the standard deviation required by the scheduler
+        latents = latents * self.scheduler.init_noise_sigma
+        return latents
+    
     @torch.no_grad()
     def __call__(
         self,
@@ -326,14 +341,14 @@ class StableDiffusionAITPipeline(StableDiffusionPipeline):
         latents = latents.to(self.device)
 
         # set timesteps
-        accepts_offset = "offset" in set(
-            inspect.signature(self.scheduler.set_timesteps).parameters.keys()
-        )
-        extra_set_kwargs = {}
-        if accepts_offset:
-            extra_set_kwargs["offset"] = 1
+        # accepts_offset = "offset" in set(
+        #     inspect.signature(self.scheduler.set_timesteps).parameters.keys()
+        # )
+        # extra_set_kwargs = {}
+        # if accepts_offset:
+        #     extra_set_kwargs["offset"] = 1
 
-        self.scheduler.set_timesteps(num_inference_steps, **extra_set_kwargs)
+        # self.scheduler.set_timesteps(num_inference_steps, **extra_set_kwargs)
 
         latents = latents * self.scheduler.init_noise_sigma
 
@@ -359,12 +374,12 @@ class StableDiffusionAITPipeline(StableDiffusionPipeline):
             latent_model_input = (
                 torch.cat([latents] * 2) if do_classifier_free_guidance else latents
             )
-            latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
+            latent_model_input = self.scheduler.scale_model_input(latent_model_input, i, t)
 
-            if isinstance(self.scheduler, LMSDiscreteScheduler):
-                sigma = self.scheduler.sigmas[i]
-                # the model input needs to be scaled to match the continuous ODE formulation in K-LMS
-                latent_model_input = latent_model_input / ((sigma**2 + 1) ** 0.5)
+            # if isinstance(self.scheduler, LMSDiscreteScheduler):
+            #     sigma = self.scheduler.sigmas[i]
+            #     # the model input needs to be scaled to match the continuous ODE formulation in K-LMS
+            #     latent_model_input = latent_model_input / ((sigma**2 + 1) ** 0.5)
 
             # predict the noise residual
             noise_pred = self.unet_inference(
@@ -379,14 +394,20 @@ class StableDiffusionAITPipeline(StableDiffusionPipeline):
                 )
 
             # compute the previous noisy sample x_t -> x_t-1
-            if isinstance(self.scheduler, LMSDiscreteScheduler):
-                latents = self.scheduler.step(
-                    noise_pred, i, latents, **extra_step_kwargs
-                ).prev_sample
-            else:
-                latents = self.scheduler.step(
-                    noise_pred, t, latents, **extra_step_kwargs
-                ).prev_sample
+            # if isinstance(self.scheduler, LMSDiscreteScheduler):
+            #     latents = self.scheduler.step(
+            #         noise_pred, i, latents, **extra_step_kwargs
+            #     ).prev_sample
+            # else:
+            #     latents = self.scheduler.step(
+            #         noise_pred, t, latents, **extra_step_kwargs
+            #     ).prev_sample
+            # if isinstance(self.scheduler, LMSDiscreteScheduler):
+            #     latents = self.scheduler.step(
+            #         noise_pred, i, latents, **extra_step_kwargs
+            #     )
+            # else:
+                latents = self.scheduler.step(noise_pred, latents, i, t)
 
         # scale and decode the image latents with vae
         latents = 1 / 0.18215 * latents

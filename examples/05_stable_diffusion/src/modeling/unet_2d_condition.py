@@ -15,6 +15,7 @@
 from typing import Optional, Tuple, Union
 
 from aitemplate.frontend import nn
+from aitemplate.compiler import ops
 
 from .embeddings import TimestepEmbedding, Timesteps
 from .unet_blocks import get_down_block, get_up_block, UNetMidBlock2DCrossAttn
@@ -83,12 +84,14 @@ class UNet2DConditionModel(nn.Module):
         cross_attention_dim: int = 1280,
         attention_head_dim: Union[int, Tuple[int]] = 8,
         use_linear_projection: bool = False,
+        is_remove_resnet_pre_silu: bool = False,
     ):
         super().__init__()
         self.center_input_sample = center_input_sample
         self.sample_size = sample_size
         time_embed_dim = block_out_channels[0] * 4
-
+        self.is_remove_resnet_pre_silu = is_remove_resnet_pre_silu
+        
         # input
         self.conv_in = nn.Conv2dBias(in_channels, block_out_channels[0], 3, 1, 1)
         # time
@@ -123,6 +126,7 @@ class UNet2DConditionModel(nn.Module):
                 cross_attention_dim=cross_attention_dim,
                 downsample_padding=downsample_padding,
                 use_linear_projection=use_linear_projection,
+                is_remove_resnet_pre_silu=is_remove_resnet_pre_silu,
             )
             self.down_blocks.append(down_block)
 
@@ -138,6 +142,7 @@ class UNet2DConditionModel(nn.Module):
             attn_num_head_channels=attention_head_dim[-1],
             resnet_groups=norm_num_groups,
             use_linear_projection=use_linear_projection,
+            is_remove_resnet_pre_silu=is_remove_resnet_pre_silu,
         )
 
         # up
@@ -166,6 +171,7 @@ class UNet2DConditionModel(nn.Module):
                 attn_num_head_channels=reversed_attention_head_dim[i],
                 cross_attention_dim=cross_attention_dim,
                 use_linear_projection=use_linear_projection,
+                is_remove_resnet_pre_silu=is_remove_resnet_pre_silu,
             )
             self.up_blocks.append(up_block)
             prev_output_channel = output_channel
@@ -205,6 +211,12 @@ class UNet2DConditionModel(nn.Module):
         t_emb = self.time_proj(timesteps)
         emb = self.time_embedding(t_emb)
 
+        ## remove rebudant silu op
+        if self.is_remove_resnet_pre_silu:
+            silu_emb = ops.silu(emb)
+        else:
+            silu_emb = emb
+            
         # 2. pre-process
         sample = self.conv_in(sample)
 
@@ -217,17 +229,17 @@ class UNet2DConditionModel(nn.Module):
             ):
                 sample, res_samples = downsample_block(
                     hidden_states=sample,
-                    temb=emb,
+                    temb=silu_emb,
                     encoder_hidden_states=encoder_hidden_states,
                 )
             else:
-                sample, res_samples = downsample_block(hidden_states=sample, temb=emb)
+                sample, res_samples = downsample_block(hidden_states=sample, temb=silu_emb)
 
             down_block_res_samples += res_samples
 
         # 4. mid
         sample = self.mid_block(
-            sample, emb, encoder_hidden_states=encoder_hidden_states
+            sample, silu_emb, encoder_hidden_states=encoder_hidden_states
         )
 
         # 5. up
@@ -243,13 +255,13 @@ class UNet2DConditionModel(nn.Module):
             ):
                 sample = upsample_block(
                     hidden_states=sample,
-                    temb=emb,
+                    temb=silu_emb,
                     res_hidden_states_tuple=res_samples,
                     encoder_hidden_states=encoder_hidden_states,
                 )
             else:
                 sample = upsample_block(
-                    hidden_states=sample, temb=emb, res_hidden_states_tuple=res_samples
+                    hidden_states=sample, temb=silu_emb, res_hidden_states_tuple=res_samples
                 )
 
         # 6. post-process

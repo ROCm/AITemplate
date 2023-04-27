@@ -34,13 +34,14 @@ from src.compile_lib.compile_vae import compile_vae
     default="./tmp/diffusers-pipeline/stabilityai/stable-diffusion-v2",
     help="the local diffusers pipeline directory",
 )
+@click.option("--is-remove-resnet-pre-silu", default=True, help="whether remove resnet-pre-silu or not")
 @click.option("--width", default=512, help="Width of generated image")
 @click.option("--height", default=512, help="Height of generated image")
 @click.option("--batch-size", default=1, help="batch size")
 @click.option("--use-fp16-acc", default=True, help="use fp16 accumulation")
 @click.option("--convert-conv-to-gemm", default=True, help="convert 1x1 conv to gemm")
 def compile_diffusers(
-    local_dir, width, height, batch_size, use_fp16_acc=True, convert_conv_to_gemm=True
+    local_dir, width, height, batch_size, is_remove_resnet_pre_silu, use_fp16_acc=True, convert_conv_to_gemm=True
 ):
     logging.getLogger().setLevel(logging.INFO)
     torch.manual_seed(4896)
@@ -72,7 +73,7 @@ def compile_diffusers(
         dim=pipe.text_encoder.config.hidden_size,
         act_layer=pipe.text_encoder.config.hidden_act,
     )
-    # UNet
+    #UNet
     compile_unet(
         pipe.unet,
         batch_size=batch_size * 2,
@@ -83,6 +84,7 @@ def compile_diffusers(
         hidden_dim=pipe.unet.config.cross_attention_dim,
         attention_head_dim=pipe.unet.config.attention_head_dim,
         use_linear_projection=pipe.unet.config.get("use_linear_projection", False),
+        is_remove_resnet_pre_silu=is_remove_resnet_pre_silu,
     )
     # VAE
     compile_vae(
