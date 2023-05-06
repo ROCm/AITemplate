@@ -142,6 +142,42 @@ class AttnTileDesc:
         )
         return template.render(param=args)
 
+@dataclass
+class WmmaAttnTileDesc:
+    block_size: int
+    m_per_block: int
+    n_per_block: int
+    k_per_block: int
+    ak1: int
+    bk1: int
+    Gemm1NPerBlock: int
+    Gemm1KPerBlock: int
+    b1k1: int
+    m_per_wmma: int
+    n_per_wmma: int
+    o_per_wmma: int
+    m_wmma_per_wave: int
+    n_wmma_per_wave: int
+    o_wmma_per_wave: int
+
+    def __str__(self) -> str:
+        values = list(self.__dict__.values())
+        return "_".join([str(x) for x in values])
+
+    def emit(self) -> str:
+        args = deepcopy(self.__dict__)
+        template = jinja2.Template(
+            """
+{%for key, value in param.items() %}
+{% if value!=0 %}   {{value}}, // {{key}}
+    {% endif %}
+{% endfor %}
+""",
+            trim_blocks=True,
+            lstrip_blocks=True,
+        )
+        return template.render(param=args)
+
 
 @dataclass
 class BlockTransferDesc:

@@ -1734,29 +1734,45 @@ def CreateBmmSoftmaxBmmPermOperator(
         op_type = gemm.OpType.DeviceBatchedGemmSoftmaxGemmPermute_Wmma_CShuffle
         
         tile_descriptions = [
-            gemm.AttnTileDesc(256, 128, 64, 32, 8, 64, 32, 8, 16, 16, 16, 1, 4, 4),
-            gemm.AttnTileDesc(256, 128, 64, 64, 8, 64, 64, 8, 16, 16, 16, 1, 4, 4),
-            gemm.AttnTileDesc(128,  64, 64, 64, 8, 64, 64, 8, 16, 16, 16, 1, 4, 4),
-            gemm.AttnTileDesc(128,  64, 64, 32, 8, 64, 32, 8, 16, 16, 16, 1, 4, 4),
-            gemm.AttnTileDesc(128,  64, 64, 64, 8, 32, 32, 8, 16, 16, 16, 1, 4, 2),
-            gemm.AttnTileDesc(128,  64, 32, 32, 8, 32, 32, 8, 16, 16, 16, 1, 2, 2),
-            gemm.AttnTileDesc( 64,  32, 64, 64, 8, 64, 64, 8, 16, 16, 16, 1, 4, 4),
-            gemm.AttnTileDesc( 64,  32, 64, 32, 8, 64, 32, 8, 16, 16, 16, 1, 4, 4),
-            gemm.AttnTileDesc( 64,  32, 64, 64, 8, 32, 32, 8, 16, 16, 16, 1, 4, 2),
-            gemm.AttnTileDesc( 64,  32, 32, 32, 8, 32, 32, 8, 16, 16, 16, 1, 2, 2),
+            gemm.WmmaAttnTileDesc(256, 128, 192,  48, 8, 4, 48, 64, 8, 16, 16, 16, 1, 12, 3),
+            
+            gemm.WmmaAttnTileDesc(128,  64, 128,  80, 8, 8, 80, 64, 8, 16, 16, 16, 1,  8, 5),
+            gemm.WmmaAttnTileDesc(128,  64, 192,  48, 8, 8, 48, 64, 8, 16, 16, 16, 1, 12, 3),
+            gemm.WmmaAttnTileDesc(128,  64,  64,  48, 8, 8, 48, 64, 8, 16, 16, 16, 1,  4, 3),
+            
+            gemm.WmmaAttnTileDesc( 64,  32,  64,  48, 8, 8, 48, 64, 8, 16, 16, 16, 1,  4, 3),
+            gemm.WmmaAttnTileDesc( 64,  32,  64,  80, 8, 8, 80, 64, 8, 16, 16, 16, 1,  4, 5),
+            gemm.WmmaAttnTileDesc( 64,  32,  32, 160, 8, 8, 80, 32, 8, 16, 16, 16, 1,  2, 5),
+            
+            gemm.WmmaAttnTileDesc( 32,  16,  32, 160, 8, 8, 80, 32, 8, 16, 16, 16, 1,  2, 5),
+            gemm.WmmaAttnTileDesc( 32,  16,  64,  80, 8, 8, 80, 64, 8, 16, 16, 16, 1,  4, 5),
+            gemm.WmmaAttnTileDesc( 32,  16,  64,  48, 8, 8, 48, 64, 8, 16, 16, 16, 1,  4, 3),
         ]
 
-        block_descriptions = [
-            gemm.BlockTransferDesc([4, 64, 1], [1, 0, 2], [1, 0, 2], 2, 8, 8, 1),
-            gemm.BlockTransferDesc([4, 64, 1], [1, 0, 2], [1, 0, 2], 2, 8, 8, 1),
-            gemm.BlockTransferDesc([4, 32, 1], [1, 0, 2], [1, 0, 2], 2, 8, 8, 1),
-            gemm.BlockTransferDesc([4, 32, 1], [1, 0, 2], [1, 0, 2], 2, 8, 8, 1),
-            gemm.BlockTransferDesc([4, 32, 1], [1, 0, 2], [1, 0, 2], 2, 8, 8, 1),
-            gemm.BlockTransferDesc([4, 32, 1], [1, 0, 2], [1, 0, 2], 2, 8, 8, 1),
-            gemm.BlockTransferDesc([4, 16, 1], [1, 0, 2], [1, 0, 2], 2, 8, 8, 1),
-            gemm.BlockTransferDesc([4, 16, 1], [1, 0, 2], [1, 0, 2], 2, 8, 8, 1),
-            gemm.BlockTransferDesc([4, 16, 1], [1, 0, 2], [1, 0, 2], 2, 8, 8, 1),
-            gemm.BlockTransferDesc([4, 16, 1], [1, 0, 2], [1, 0, 2], 2, 8, 8, 1),
+        a_block_descriptions = [
+            gemm.BlockTransferDesc([2, 128, 1], [1, 0, 2], [1, 0, 2], 2, 8, 8, 1),
+            gemm.BlockTransferDesc([2, 64, 1], [1, 0, 2], [1, 0, 2], 2, 8, 8, 1),
+            gemm.BlockTransferDesc([2, 64, 1], [1, 0, 2], [1, 0, 2], 2, 8, 8, 1),
+            gemm.BlockTransferDesc([2, 64, 1], [1, 0, 2], [1, 0, 2], 2, 8, 8, 1),
+            gemm.BlockTransferDesc([2, 32, 1], [1, 0, 2], [1, 0, 2], 2, 8, 8, 1),
+            gemm.BlockTransferDesc([2, 32, 1], [1, 0, 2], [1, 0, 2], 2, 8, 8, 1),
+            gemm.BlockTransferDesc([2, 32, 1], [1, 0, 2], [1, 0, 2], 2, 8, 8, 1),
+            gemm.BlockTransferDesc([2, 16, 1], [1, 0, 2], [1, 0, 2], 2, 8, 8, 1),
+            gemm.BlockTransferDesc([2, 16, 1], [1, 0, 2], [1, 0, 2], 2, 8, 8, 1),
+            gemm.BlockTransferDesc([2, 16, 1], [1, 0, 2], [1, 0, 2], 2, 8, 8, 1),
+        ]
+        
+        b0_block_descriptions = [
+            gemm.BlockTransferDesc([4, 64, 1], [1, 0, 2], [1, 0, 2], 2, 4, 4, 1),
+            gemm.BlockTransferDesc([2, 64, 1], [1, 0, 2], [1, 0, 2], 2, 8, 8, 1),
+            gemm.BlockTransferDesc([2, 64, 1], [1, 0, 2], [1, 0, 2], 2, 8, 8, 1),
+            gemm.BlockTransferDesc([2, 64, 1], [1, 0, 2], [1, 0, 2], 2, 8, 8, 1),
+            gemm.BlockTransferDesc([2, 32, 1], [1, 0, 2], [1, 0, 2], 2, 8, 8, 1),
+            gemm.BlockTransferDesc([2, 32, 1], [1, 0, 2], [1, 0, 2], 2, 8, 8, 1),
+            gemm.BlockTransferDesc([2, 32, 1], [1, 0, 2], [1, 0, 2], 2, 8, 8, 1),
+            gemm.BlockTransferDesc([2, 16, 1], [1, 0, 2], [1, 0, 2], 2, 8, 8, 1),
+            gemm.BlockTransferDesc([2, 16, 1], [1, 0, 2], [1, 0, 2], 2, 8, 8, 1),
+            gemm.BlockTransferDesc([2, 16, 1], [1, 0, 2], [1, 0, 2], 2, 8, 8, 1),
         ]
         
     else:
@@ -1806,23 +1822,32 @@ def CreateBmmSoftmaxBmmPermOperator(
     c_block_descriptions, b1_block_descriptions = [], []
     for i in range(len(tile_descriptions)):
         if Target.current().get_device_name() == "gfx1100":
-            if i <2:
-                block_transfer = [4, 8, 8]
+            if i <1:
+                block_transfer = [2, 16, 8]
+                src_vector_read = 1
                 c_block_transfer = gemm.MaskedCBlockTransferDesc(
-                    1, 2, [1, 64, 1, 4], 8, causal_mask_flag
+                    1, 1, [1, 128, 1, 2], 8, causal_mask_flag
                 )
-            elif i <6:
-                block_transfer = [4, 4, 8]
+            elif i <4:
+                block_transfer = [2, 8, 8]
+                src_vector_read = 2
                 c_block_transfer = gemm.MaskedCBlockTransferDesc(
-                    1, 2, [1, 32, 1, 4], 8, causal_mask_flag
+                    1, 1, [1, 64, 1, 2], 8, causal_mask_flag
+                )
+            elif i < 7:
+                block_transfer = [2, 4, 8]
+                src_vector_read = 4
+                c_block_transfer = gemm.MaskedCBlockTransferDesc(
+                    1, 1, [1, 32, 1, 2], 8, causal_mask_flag
                 )
             else:
-                block_transfer = [4, 2, 8]
+                block_transfer = [2, 2, 8]
+                src_vector_read = 8
                 c_block_transfer = gemm.MaskedCBlockTransferDesc(
-                    1, 2, [1, 16, 1, 4], 8, causal_mask_flag
+                    1, 1, [1, 16, 1, 2], 8, causal_mask_flag
                 )
             b1_block_descriptions.append(
-                gemm.BlockTransferDesc(block_transfer, [0, 2, 1], [0, 2, 1], 1, 8, 1, 0)
+                gemm.BlockTransferDesc(block_transfer, [0, 2, 1], [0, 2, 1], 1, src_vector_read, 1, 0)
             )
             c_block_descriptions.append(c_block_transfer)
         else:
@@ -1865,32 +1890,61 @@ def CreateBmmSoftmaxBmmPermOperator(
 
     operations = []
     extra_op = element_op if causal_mask_flag == 0 else causal_mask
-    for tile_desc, block_desc, b1_block_desc, c_block_desc, gemm_spec in zip(
+    if Target.current().get_device_name() == "gfx1100":
+        for tile_desc, a_block_desc, b0_block_desc, b1_block_desc, c_block_desc, gemm_spec in zip(
         tile_descriptions,
-        block_descriptions,
+        a_block_descriptions,
+        b0_block_descriptions,
         b1_block_descriptions,
         c_block_descriptions,
         gemm_specialization,
-    ):
-        new_operation = gemm.GemmOperation(
-            operation_kind=operation_kind,
-            extra_kind=extra_op,
-            op_type=op_type,
-            A=a_element_desc,
-            B=b_element_desc,
-            C=c_element_desc,
-            a_elem_op=element_op,
-            b_elem_op=element_op,
-            epilogue_functor=element_op,
-            gemm_specialization=gemm_spec,
-            tile_desc=tile_desc,
-            a_block_transfer=block_desc,
-            b_block_transfer=block_desc,
-            b1_block_transfer=b1_block_desc,
-            c_block_transfer=c_block_desc,
-        )
-        manifest.append(new_operation)
-        operations.append(new_operation)
+        ):
+            new_operation = gemm.GemmOperation(
+                operation_kind=operation_kind,
+                extra_kind=extra_op,
+                op_type=op_type,
+                A=a_element_desc,
+                B=b_element_desc,
+                C=c_element_desc,
+                a_elem_op=element_op,
+                b_elem_op=element_op,
+                epilogue_functor=element_op,
+                gemm_specialization=gemm_spec,
+                tile_desc=tile_desc,
+                a_block_transfer=a_block_desc,
+                b_block_transfer=b0_block_desc,
+                b1_block_transfer=b1_block_desc,
+                c_block_transfer=c_block_desc,
+            )
+            manifest.append(new_operation)
+            operations.append(new_operation)
+    else:
+        for tile_desc, block_desc, b1_block_desc, c_block_desc, gemm_spec in zip(
+            tile_descriptions,
+            block_descriptions,
+            b1_block_descriptions,
+            c_block_descriptions,
+            gemm_specialization,
+        ):
+            new_operation = gemm.GemmOperation(
+                operation_kind=operation_kind,
+                extra_kind=extra_op,
+                op_type=op_type,
+                A=a_element_desc,
+                B=b_element_desc,
+                C=c_element_desc,
+                a_elem_op=element_op,
+                b_elem_op=element_op,
+                epilogue_functor=element_op,
+                gemm_specialization=gemm_spec,
+                tile_desc=tile_desc,
+                a_block_transfer=block_desc,
+                b_block_transfer=block_desc,
+                b1_block_transfer=b1_block_desc,
+                c_block_transfer=c_block_desc,
+            )
+            manifest.append(new_operation)
+            operations.append(new_operation)
     return operations
 
 
