@@ -71,7 +71,7 @@ def compile_diffusers(
         depth=pipe.text_encoder.config.num_hidden_layers,
         num_heads=pipe.text_encoder.config.num_attention_heads,
         dim=pipe.text_encoder.config.hidden_size,
-        act_layer=pipe.text_encoder.config.hidden_act,
+        act_layer="quick_gelu",
     )
     #UNet
     compile_unet(
