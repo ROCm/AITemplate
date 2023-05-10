@@ -141,7 +141,7 @@ def _is_supported_op(op_type: str):
     from aitemplate.backend.target import Target
 
     if Target.current().name() == "rocm":
-        return op_type == "bmm_softmax_bmm_permute"
+        return op_type in {"bmm_softmax_bmm_permute", "bmm_softmax_bmm_permute_causal"}
     else:
         return op_type in {"bmm_rcr_n1", "bmm_rcr", "bmm_rrr_permute"}
 
@@ -183,7 +183,7 @@ def _check_alignment(op: Operator, offset: int):
         a_shape = op._attrs["input_accessors"][0].original_shapes
         # check K
         return _check_dim_alignment(a_shape, dim_idx=2, dtype=dtype)
-    if op._attrs["op"] == "bmm_softmax_bmm_permute":
+    if op._attrs["op"] in {"bmm_softmax_bmm_permute", "bmm_softmax_bmm_permute_causal"}:
         # a = (B, M, K), b = (B, N, K), c = (B, N, O)
         # t = bmm_rcr(a, b)
         # t' = softmax(t) # t' shape (B, M, N)
