@@ -19,6 +19,7 @@ import ctypes
 import enum
 import logging
 import math
+from functools import lru_cache
 from typing import Callable, Dict, List, NamedTuple, Optional, Tuple, TypeVar, Union
 
 import numpy as np
@@ -156,6 +157,7 @@ def _reshape_tensor(tensor: TorchTensor, shape: List[int]) -> TorchTensor:
 
 class Model:
     class _DLLWrapper:
+        @lru_cache
         def __init__(
             self,
             lib_path: str,
@@ -506,7 +508,7 @@ class Model:
                 name: _reshape_tensor(outputs[idx], outputs_ait[name].shape)
                 for name, idx in self._output_name_to_index.items()
             }
-
+    
     def run_with_tensors(
         self,
         inputs: Union[List[TorchTensor], Dict[str, TorchTensor]],
