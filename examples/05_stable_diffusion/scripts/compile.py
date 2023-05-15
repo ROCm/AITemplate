@@ -29,6 +29,7 @@ from src.compile_lib.compile_vae import compile_vae
 
 
 @click.command()
+@click.option("--mode", default="Info", help="the mode of running model")
 @click.option(
     "--local-dir",
     default="./tmp/diffusers-pipeline/stabilityai/stable-diffusion-v2",
@@ -41,9 +42,13 @@ from src.compile_lib.compile_vae import compile_vae
 @click.option("--use-fp16-acc", default=True, help="use fp16 accumulation")
 @click.option("--convert-conv-to-gemm", default=True, help="convert 1x1 conv to gemm")
 def compile_diffusers(
-    local_dir, width, height, batch_size, is_remove_resnet_pre_silu, use_fp16_acc=True, convert_conv_to_gemm=True
+    mode, local_dir, width, height, batch_size, is_remove_resnet_pre_silu, use_fp16_acc=True, convert_conv_to_gemm=True
 ):
-    logging.getLogger().setLevel(logging.INFO)
+    if mode == "Debug":
+        logging.getLogger("aitemplate").setLevel(logging.DEBUG)
+    else:
+        logging.getLogger().setLevel(logging.INFO)
+        
     torch.manual_seed(4896)
 
     if detect_target().name() == "rocm":
