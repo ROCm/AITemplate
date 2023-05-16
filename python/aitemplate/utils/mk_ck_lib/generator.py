@@ -1734,23 +1734,24 @@ def CreateBmmSoftmaxBmmPermOperator(
         op_type = gemm.OpType.DeviceBatchedGemmSoftmaxGemmPermute_Wmma_CShuffle
         
         tile_descriptions = [
-            gemm.WmmaAttnTileDesc(256, 128, 192,  48, 8, 4, 48, 64, 8, 16, 16, 16, 1, 12, 3),
+            gemm.WmmaAttnTileDesc(256, 128,  64,  64, 8, 8, 64, 64, 8, 16, 16, 16, 1,  4, 4),
             
-            gemm.WmmaAttnTileDesc(128,  64, 128,  80, 8, 8, 80, 64, 8, 16, 16, 16, 1,  8, 5),
-            gemm.WmmaAttnTileDesc(128,  64, 192,  48, 8, 8, 48, 64, 8, 16, 16, 16, 1, 12, 3),
-            gemm.WmmaAttnTileDesc(128,  64,  64,  48, 8, 8, 48, 64, 8, 16, 16, 16, 1,  4, 3),
+            gemm.WmmaAttnTileDesc(128,  64, 192,  64, 8, 8, 64, 64, 8, 16, 16, 16, 1, 12, 4),
+            gemm.WmmaAttnTileDesc(128,  64, 128,  64, 8, 8, 64, 64, 8, 16, 16, 16, 1,  8, 4),
+            gemm.WmmaAttnTileDesc(128,  64,  64,  64, 8, 8, 64, 64, 8, 16, 16, 16, 1,  4, 4),
+            gemm.WmmaAttnTileDesc(128,  64,  64,  64, 8, 8, 32, 64, 8, 16, 16, 16, 1,  4, 2),
             
-            gemm.WmmaAttnTileDesc( 64,  32,  64,  48, 8, 8, 48, 64, 8, 16, 16, 16, 1,  4, 3),
-            gemm.WmmaAttnTileDesc( 64,  32,  64,  80, 8, 8, 80, 64, 8, 16, 16, 16, 1,  4, 5),
-            gemm.WmmaAttnTileDesc( 64,  32,  32, 160, 8, 8, 80, 32, 8, 16, 16, 16, 1,  2, 5),
+            gemm.WmmaAttnTileDesc( 64,  32,  96,  64, 8, 8, 64, 64, 8, 16, 16, 16, 1,  6, 4),
+            gemm.WmmaAttnTileDesc( 64,  32,  64,  64, 8, 8, 64, 64, 8, 16, 16, 16, 1,  4, 4),
+            gemm.WmmaAttnTileDesc( 64,  32,  64,  64, 8, 8, 32, 64, 8, 16, 16, 16, 1,  4, 2),
             
-            gemm.WmmaAttnTileDesc( 32,  16,  32, 160, 8, 8, 80, 32, 8, 16, 16, 16, 1,  2, 5),
-            gemm.WmmaAttnTileDesc( 32,  16,  64,  80, 8, 8, 80, 64, 8, 16, 16, 16, 1,  4, 5),
-            gemm.WmmaAttnTileDesc( 32,  16,  64,  48, 8, 8, 48, 64, 8, 16, 16, 16, 1,  4, 3),
+            gemm.WmmaAttnTileDesc( 32,  16,  64,  64, 8, 8, 64, 64, 8, 16, 16, 16, 1,  4, 4),
+            gemm.WmmaAttnTileDesc( 32,  16,  64,  64, 8, 8, 32, 64, 8, 16, 16, 16, 1,  4, 2),
         ]
 
         a_block_descriptions = [
             gemm.BlockTransferDesc([2, 128, 1], [1, 0, 2], [1, 0, 2], 2, 8, 8, 1),
+            gemm.BlockTransferDesc([2, 64, 1], [1, 0, 2], [1, 0, 2], 2, 8, 8, 1),
             gemm.BlockTransferDesc([2, 64, 1], [1, 0, 2], [1, 0, 2], 2, 8, 8, 1),
             gemm.BlockTransferDesc([2, 64, 1], [1, 0, 2], [1, 0, 2], 2, 8, 8, 1),
             gemm.BlockTransferDesc([2, 64, 1], [1, 0, 2], [1, 0, 2], 2, 8, 8, 1),
@@ -1764,6 +1765,7 @@ def CreateBmmSoftmaxBmmPermOperator(
         
         b0_block_descriptions = [
             gemm.BlockTransferDesc([4, 64, 1], [1, 0, 2], [1, 0, 2], 2, 4, 4, 1),
+            gemm.BlockTransferDesc([2, 64, 1], [1, 0, 2], [1, 0, 2], 2, 8, 8, 1),
             gemm.BlockTransferDesc([2, 64, 1], [1, 0, 2], [1, 0, 2], 2, 8, 8, 1),
             gemm.BlockTransferDesc([2, 64, 1], [1, 0, 2], [1, 0, 2], 2, 8, 8, 1),
             gemm.BlockTransferDesc([2, 64, 1], [1, 0, 2], [1, 0, 2], 2, 8, 8, 1),
@@ -1828,13 +1830,13 @@ def CreateBmmSoftmaxBmmPermOperator(
                 c_block_transfer = gemm.MaskedCBlockTransferDesc(
                     1, 1, [1, 128, 1, 2], 8, causal_mask_flag
                 )
-            elif i <4:
+            elif i <5:
                 block_transfer = [2, 8, 8]
                 src_vector_read = 2
                 c_block_transfer = gemm.MaskedCBlockTransferDesc(
                     1, 1, [1, 64, 1, 2], 8, causal_mask_flag
                 )
-            elif i < 7:
+            elif i < 8:
                 block_transfer = [2, 4, 8]
                 src_vector_read = 4
                 c_block_transfer = gemm.MaskedCBlockTransferDesc(
