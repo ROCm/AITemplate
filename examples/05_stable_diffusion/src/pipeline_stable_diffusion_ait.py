@@ -13,6 +13,8 @@
 #  limitations under the License.
 #
 import inspect
+import threading
+import time
 
 import os
 import warnings
@@ -41,6 +43,21 @@ from diffusers.pipelines.stable_diffusion import (
 
 from transformers import CLIPFeatureExtractor, CLIPTextModel, CLIPTokenizer
 
+
+class MyThread(threading.Thread):
+    def __init__(self, func, args=()):
+        super(MyThread, self).__init__()
+        self.func = func
+        self.args = args
+    def run(self):
+        time.sleep(2)
+        self.result = self.func(*self.args)
+    def get_result(self):
+        threading.Thread.join(self)  # 等待线程执行完毕
+        try:
+            return self.result
+        except Exception:
+            return None
 
 class StableDiffusionAITPipeline(StableDiffusionPipeline):
     r"""
@@ -100,15 +117,35 @@ class StableDiffusionAITPipeline(StableDiffusionPipeline):
         )
 
         workdir = "tmp/"
-        self.clip_ait_exe = self.init_ait_module(
-            model_name="CLIPTextModel", workdir=workdir
-        )
-        self.unet_ait_exe = self.init_ait_module(
-            model_name="UNet2DConditionModel", workdir=workdir
-        )
-        self.vae_ait_exe = self.init_ait_module(
-            model_name="AutoencoderKL", workdir=workdir
-        )
+        
+        model_list = ["CLIPTextModel", "UNet2DConditionModel", "AutoencoderKL"]
+        
+        clip_thread = MyThread(self.init_ait_module, [model_list[0], workdir])
+        unet_thread = MyThread(self.init_ait_module, [model_list[1], workdir])
+        vae_thread = MyThread(self.init_ait_module, [model_list[2], workdir])
+        
+        clip_thread.start()
+        unet_thread.start()
+        vae_thread.start()
+        
+        # clip_thread.join()
+        # unet_thread.join()
+        # vae_thread.join()
+
+        self.clip_ait_exe = clip_thread.get_result()
+        self.unet_ait_exe = unet_thread.get_result()
+        self.vae_ait_exe = vae_thread.get_result()
+        
+        
+        # self.clip_ait_exe = self.init_ait_module(
+        #     model_name="CLIPTextModel", workdir=workdir
+        # )
+        # self.unet_ait_exe = self.init_ait_module(
+        #     model_name="UNet2DConditionModel", workdir=workdir
+        # )
+        # self.vae_ait_exe = self.init_ait_module(
+        #     model_name="AutoencoderKL", workdir=workdir
+        # )
 
     def init_ait_module(
         self,
@@ -117,7 +154,7 @@ class StableDiffusionAITPipeline(StableDiffusionPipeline):
     ):
         mod = Model(os.path.join(workdir, model_name, "test.so"))
         return mod
-
+    
     def unet_inference(self, latent_model_input, timesteps, encoder_hidden_states):
         exe_module = self.unet_ait_exe
         timesteps_pt = timesteps.expand(latent_model_input.shape[0])
@@ -134,7 +171,7 @@ class StableDiffusionAITPipeline(StableDiffusionPipeline):
         for i in range(num_outputs):
             shape = exe_module.get_output_maximum_shape(i)
             ys.append(torch.empty(shape).cuda().half())
-        exe_module.run_with_tensors(inputs, ys, graph_mode=False)
+        exe_module.run_with_tensors(inputs, ys, graph_mode=True)
         noise_pred = ys[0].permute((0, 3, 1, 2)).float()
         return noise_pred
 
@@ -151,7 +188,7 @@ class StableDiffusionAITPipeline(StableDiffusionPipeline):
         for i in range(num_outputs):
             shape = exe_module.get_output_maximum_shape(i)
             ys.append(torch.empty(shape).cuda().half())
-        exe_module.run_with_tensors(inputs, ys, graph_mode=False)
+        exe_module.run_with_tensors(inputs, ys, graph_mode=True)
         return ys[0].float()
 
     def vae_inference(self, vae_input):
@@ -162,7 +199,7 @@ class StableDiffusionAITPipeline(StableDiffusionPipeline):
         for i in range(num_outputs):
             shape = exe_module.get_output_maximum_shape(i)
             ys.append(torch.empty(shape).cuda().half())
-        exe_module.run_with_tensors(inputs, ys, graph_mode=False)
+        exe_module.run_with_tensors(inputs, ys, graph_mode=True)
         vae_out = ys[0].permute((0, 3, 1, 2)).float()
         return vae_out
 
