@@ -857,8 +857,8 @@ class gemm(Operator):
 
 def _profiler_results_groupby_key(instance):
     return (
-        instance[1]["name"],  # unique op name
-        instance[2],  # profiler executable
+        instance[1]["op"],  # unique op name
+        # instance[2],  # profiler executable
         instance[3],  # profiler key (gemm shape)
     )
 

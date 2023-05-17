@@ -290,7 +290,7 @@ def benchmark_vae(
 @click.option("--batch-size", default=1, help="batch size")
 @click.option("--verify", type=bool, default=False, help="verify correctness")
 @click.option("--benchmark-pt", type=bool, default=False, help="run pt benchmark")
-@click.option("--profile-op", type=bool, default=False, help="profile model on op level")
+@click.option("--profile-op", type=bool, default=True, help="profile model on op level")
 def benchmark_diffusers(local_dir, batch_size, verify, benchmark_pt, profile_op):
     assert batch_size == 1, "batch size must be 1 for submodule verification"
     logging.getLogger().setLevel(logging.INFO)

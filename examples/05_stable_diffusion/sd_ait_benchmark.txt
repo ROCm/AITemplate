@@ -1,0 +1,8 @@
+unet batch_size: 2, latency: 50.08192253112793 ms
+unet batch_size: 2, latency: 50.17349338531494 ms
+unet batch_size: 2, latency: 42.542840003967285 ms
+unet batch_size: 2, latency: 34.70693302154541 ms
+clip batch_size: 1, latency: 3.182446777820587 ms
+clip batch_size: 1, latency: 3.1882439851760864 ms
+unet batch_size: 2, latency: 34.95267677307129 ms
+vae batch_size: 1, latency: 51.96763515472412 ms
