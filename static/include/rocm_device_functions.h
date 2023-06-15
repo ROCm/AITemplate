@@ -24,7 +24,7 @@
 
 namespace ait {
 
-inline thread_local bool target_has_graph_mode = false;
+inline thread_local bool target_has_graph_mode = true;
 
 using DeviceError = hipError_t;
 using DevicePropertyType = hipDeviceProp_t;
@@ -182,6 +182,10 @@ inline DeviceError StreamDestroy(StreamType stream) {
   return hipStreamDestroy(stream);
 }
 
+inline DeviceError StreamWaitEvent(StreamType stream, EventType event) {
+  return hipStreamWaitEvent(stream, event, 0);
+}
+
 inline DeviceError GraphInstantiate(
     GraphExecType* graph_exec,
     GraphType graph) {
@@ -194,7 +198,8 @@ inline DeviceError GraphDestroy(GraphType graph) {
 
 inline DeviceError GraphExecUpdate(GraphExecType graph_exec, GraphType graph) {
   // We don't have hipGraphExecUpdate in some versions of rocm
-  return hipErrorUnknown;
+  hipGraphExecUpdateResult update;
+  return hipGraphExecUpdate(graph_exec, graph, nullptr, &update);
 }
 
 inline DeviceError GraphExecDestroy(GraphExecType graph_exec) {
@@ -282,7 +287,7 @@ inline DeviceError StreamSynchronize(StreamType stream) {
   return hipStreamSynchronize(stream);
 }
 
-inline DeviceError CreateEvent(EventType* event) {
+inline DeviceError CreateEvent(EventType* event, bool measure_time = true) {
   return hipEventCreate(event);
 }
 

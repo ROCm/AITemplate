@@ -61,6 +61,8 @@ class ModelBase {
       : blob_(RAII_DeviceMalloc(blob_size, allocator)),
         workspace_(RAII_DeviceMalloc(workspace_size, allocator)),
         params_(num_inputs + num_outputs + num_unbound_constants),
+        workspace_size_{workspace_size},
+        unique_workspace_size_{unique_workspace_size},
         num_inputs_(num_inputs),
         num_outputs_(num_outputs),
         constants_(constants) {
@@ -78,7 +80,7 @@ class ModelBase {
   }
 
  public:
-  ~ModelBase() {
+  virtual ~ModelBase() {
     if (run_finished_ != nullptr) {
       DestroyEvent(run_finished_);
     }
@@ -214,6 +216,29 @@ class ModelBase {
   }
 
   void RunAsGraph(StreamType stream) {
+#ifdef __HIP_PLATFORM_HCC__
+    if (graph_exec_ == nullptr) {
+      DEVICE_CHECK(StreamBeginCapture(graph_capture_stream_, /*global=*/false));
+      try {
+        static_cast<ModelType*>(this)->RunImpl(graph_capture_stream_);
+      } catch (...) {
+        GraphType graph;
+        // No need to DEVICE_CHECK here, we want to see the original exception.
+        EndCapture(&graph);
+        if (graph != nullptr && GraphDestroy(graph) != GetDeviceSuccess()) {
+          LOG(WARNING)
+              << "Graph destruction failed while handling exception! Memory will be leaked.";
+        }
+        throw;
+      }
+      // The following function ends the capture and creates a graph
+      // inside a unique_ptr that cleans up it when it goes out of scope.
+      // Note that it throws an exception if EndCapture fails.
+      auto graph = RAII_EndCaptureAndCreateGraph(
+          [this](GraphType* graph_ptr) { return EndCapture(graph_ptr); });
+      DEVICE_CHECK(GraphInstantiate(&graph_exec_, graph.get()));
+    }
+#else
     DEVICE_CHECK(StreamBeginCapture(graph_capture_stream_, /*global=*/false));
     try {
       static_cast<ModelType*>(this)->RunImpl(graph_capture_stream_);
@@ -227,13 +252,11 @@ class ModelBase {
       }
       throw;
     }
-
     // The following function ends the capture and creates a graph
     // inside a unique_ptr that cleans up it when it goes out of scope.
     // Note that it throws an exception if EndCapture fails.
     auto graph = RAII_EndCaptureAndCreateGraph(
         [this](GraphType* graph_ptr) { return EndCapture(graph_ptr); });
-
     if (graph_exec_ == nullptr) {
       DEVICE_CHECK(GraphInstantiate(&graph_exec_, graph.get()));
     } else if (
@@ -244,6 +267,7 @@ class ModelBase {
       DEVICE_CHECK(GraphExecDestroy(graph_exec_));
       DEVICE_CHECK(GraphInstantiate(&graph_exec_, graph.get()));
     }
+#endif
 
     DEVICE_CHECK(GraphExecLaunch(graph_exec_, stream));
   }
@@ -266,6 +290,9 @@ class ModelBase {
   size_t num_inputs_;
   size_t num_outputs_;
 
+  // These values are preserved for multi-stream needs.
+  size_t workspace_size_;
+  size_t unique_workspace_size_;
   // The workspace blob is used as scratch memory. See
   // _generate_workspace in memory planning for more information.
   GPUPtr workspace_;

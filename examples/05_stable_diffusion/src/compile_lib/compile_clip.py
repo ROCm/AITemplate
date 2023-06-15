@@ -12,17 +12,21 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 #
-import numpy as np
-import torch
+
 from aitemplate.compiler import compile_model
+from aitemplate.compiler.base import IntVar
 from aitemplate.frontend import Tensor
 from aitemplate.testing import detect_target
 
 from ..modeling.clip import CLIPTextTransformer as ait_CLIPTextTransformer
 from .util import mark_output
+import torch
 
 
-def map_clip_params(pt_mod, batch_size, seqlen, depth):
+USE_CUDA = detect_target().name() == "cuda"
+
+
+def map_clip_params(pt_mod):
     params_ait = {}
     pt_params = dict(pt_mod.named_parameters())
     for key, arr in pt_params.items():
@@ -32,39 +36,41 @@ def map_clip_params(pt_mod, batch_size, seqlen, depth):
             ait_name = ait_name.replace("out_proj", "proj")
         elif name.endswith("out_proj.bias"):
             ait_name = ait_name.replace("out_proj", "proj")
-        elif name.endswith("q_proj.weight"):
-            ait_name = ait_name.replace("q_proj", "qkv")
-            prefix = key[: -len("q_proj.weight")]
-            q = pt_params[prefix + "q_proj.weight"]
-            k = pt_params[prefix + "k_proj.weight"]
-            v = pt_params[prefix + "v_proj.weight"]
-            qkv_weight = torch.cat([q, k, v], dim=0)
-            params_ait[ait_name] = qkv_weight
-            continue
-        elif name.endswith("q_proj.bias"):
-            ait_name = ait_name.replace("q_proj", "qkv")
-            prefix = key[: -len("q_proj.bias")]
-            q = pt_params[prefix + "q_proj.bias"]
-            k = pt_params[prefix + "k_proj.bias"]
-            v = pt_params[prefix + "v_proj.bias"]
-            qkv_bias = torch.cat([q, k, v], dim=0)
-            params_ait[ait_name] = qkv_bias
-            continue
-        elif name.endswith("k_proj.weight"):
-            continue
-        elif name.endswith("k_proj.bias"):
-            continue
-        elif name.endswith("v_proj.weight"):
-            continue
-        elif name.endswith("v_proj.bias"):
-            continue
+        elif USE_CUDA:
+            if "q_proj" in name:
+                ait_name = ait_name.replace("q_proj", "proj_q")
+            elif "k_proj" in name:
+                ait_name = ait_name.replace("k_proj", "proj_k")
+            elif "v_proj" in name:
+                ait_name = ait_name.replace("v_proj", "proj_v")
+        else:
+            if name.endswith("q_proj.weight"):
+                ait_name = ait_name.replace("q_proj", "qkv")
+                prefix = key[: -len("q_proj.weight")]
+                q = pt_params[prefix + "q_proj.weight"]
+                k = pt_params[prefix + "k_proj.weight"]
+                v = pt_params[prefix + "v_proj.weight"]
+                qkv_weight = torch.cat([q, k, v], dim=0)
+                params_ait[ait_name] = qkv_weight
+                continue
+            elif name.endswith("q_proj.bias"):
+                ait_name = ait_name.replace("q_proj", "qkv")
+                prefix = key[: -len("q_proj.bias")]
+                q = pt_params[prefix + "q_proj.bias"]
+                k = pt_params[prefix + "k_proj.bias"]
+                v = pt_params[prefix + "v_proj.bias"]
+                qkv_bias = torch.cat([q, k, v], dim=0)
+                params_ait[ait_name] = qkv_bias
+                continue
+            elif name.endswith("k_proj.weight"):
+                continue
+            elif name.endswith("k_proj.bias"):
+                continue
+            elif name.endswith("v_proj.weight"):
+                continue
+            elif name.endswith("v_proj.bias"):
+                continue
         params_ait[ait_name] = arr
-
-    if detect_target().name() == "cuda":
-        for i in range(depth):
-            prefix = f"encoder_layers_{i}_self_attn_cu_length"
-            cu_len = np.cumsum([0] + [seqlen] * batch_size).astype("int32")
-            params_ait[prefix] = torch.from_numpy(cu_len).cuda()
 
     return params_ait
 
@@ -96,7 +102,8 @@ def compile_clip(
     ait_mod.name_parameter_tensor()
 
     pt_mod = pt_mod.eval()
-    params_ait = map_clip_params(pt_mod, batch_size, seqlen, depth)
+    params_ait = map_clip_params(pt_mod)
+    batch_size = IntVar(values=[1, 8], name="batch_size") if USE_CUDA else batch_size
 
     input_ids_ait = Tensor(
         [batch_size, seqlen], name="input0", dtype="int64", is_input=True

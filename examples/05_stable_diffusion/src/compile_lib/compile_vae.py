@@ -12,10 +12,10 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 #
-import numpy as np
 
 import torch
 from aitemplate.compiler import compile_model
+from aitemplate.compiler.base import IntVar
 from aitemplate.frontend import Tensor
 from aitemplate.testing import detect_target
 
@@ -23,53 +23,101 @@ from ..modeling.vae import AutoencoderKL as ait_AutoencoderKL
 from .util import mark_output
 
 
-def map_vae_params(ait_module, pt_module, batch_size, seq_len):
-    pt_params = dict(pt_module.named_parameters())
-    mapped_pt_params = {}
-    for name, _ in ait_module.named_parameters():
-        ait_name = name.replace(".", "_")
-        if name in pt_params:
-            if (
-                "conv" in name
-                and "norm" not in name
-                and name.endswith(".weight")
-                and len(pt_params[name].shape) == 4
-            ):
-                mapped_pt_params[ait_name] = torch.permute(
-                    pt_params[name], [0, 2, 3, 1]
-                ).contiguous()
-            else:
-                mapped_pt_params[ait_name] = pt_params[name]
-        elif name.endswith("attention.qkv.weight"):
-            prefix = name[: -len("attention.qkv.weight")]
-            q_weight = pt_params[prefix + "query.weight"]
-            k_weight = pt_params[prefix + "key.weight"]
-            v_weight = pt_params[prefix + "value.weight"]
-            qkv_weight = torch.cat([q_weight, k_weight, v_weight], dim=0)
-            mapped_pt_params[ait_name] = qkv_weight
-        elif name.endswith("attention.qkv.bias"):
-            prefix = name[: -len("attention.qkv.bias")]
-            q_bias = pt_params[prefix + "query.bias"]
-            k_bias = pt_params[prefix + "key.bias"]
-            v_bias = pt_params[prefix + "value.bias"]
-            qkv_bias = torch.cat([q_bias, k_bias, v_bias], dim=0)
-            mapped_pt_params[ait_name] = qkv_bias
-        elif name.endswith("attention.proj.weight"):
-            prefix = name[: -len("attention.proj.weight")]
-            pt_name = prefix + "proj_attn.weight"
-            mapped_pt_params[ait_name] = pt_params[pt_name]
-        elif name.endswith("attention.proj.bias"):
-            prefix = name[: -len("attention.proj.bias")]
-            pt_name = prefix + "proj_attn.bias"
-            mapped_pt_params[ait_name] = pt_params[pt_name]
-        elif name.endswith("attention.cu_length"):
-            cu_len = np.cumsum([0] + [seq_len] * batch_size).astype("int32")
-            mapped_pt_params[ait_name] = torch.from_numpy(cu_len).cuda()
-        else:
-            pt_param = pt_module.get_parameter(name)
-            mapped_pt_params[ait_name] = pt_param
+USE_CUDA = detect_target().name() == "cuda"
 
-    return mapped_pt_params
+
+def torch_dtype_from_str(dtype: str):
+    return torch.__dict__.get(dtype, None)
+
+
+def map_vae(pt_module, device="cuda", dtype="float16"):
+    if not isinstance(pt_module, dict):
+        pt_params = dict(pt_module.named_parameters())
+    else:
+        pt_params = pt_module
+    params_ait = {}
+    for key, arr in pt_params.items():
+        if key.startswith("encoder"):
+            continue
+        if key.startswith("quant"):
+            continue
+        arr = arr.to(device, dtype=torch_dtype_from_str(dtype))
+        key = key.replace(".", "_")
+        if (
+            "conv" in key
+            and "norm" not in key
+            and key.endswith("_weight")
+            and len(arr.shape) == 4
+        ):
+            params_ait[key] = torch.permute(arr, [0, 2, 3, 1]).contiguous()
+        elif key.endswith("proj_attn_weight"):
+            prefix = key[: -len("proj_attn_weight")]
+            key = prefix + "attention_proj_weight"
+            params_ait[key] = arr
+        elif key.endswith("to_out_0_weight"):
+            prefix = key[: -len("to_out_0_weight")]
+            key = prefix + "attention_proj_weight"
+            params_ait[key] = arr
+        elif key.endswith("proj_attn_bias"):
+            prefix = key[: -len("proj_attn_bias")]
+            key = prefix + "attention_proj_bias"
+            params_ait[key] = arr
+        elif key.endswith("to_out_0_bias"):
+            prefix = key[: -len("to_out_0_bias")]
+            key = prefix + "attention_proj_bias"
+            params_ait[key] = arr
+        elif key.endswith("query_weight"):
+            prefix = key[: -len("query_weight")]
+            key = prefix + "attention_proj_q_weight"
+            params_ait[key] = arr
+        elif key.endswith("to_q_weight"):
+            prefix = key[: -len("to_q_weight")]
+            key = prefix + "attention_proj_q_weight"
+            params_ait[key] = arr
+        elif key.endswith("query_bias"):
+            prefix = key[: -len("query_bias")]
+            key = prefix + "attention_proj_q_bias"
+            params_ait[key] = arr
+        elif key.endswith("to_q_bias"):
+            prefix = key[: -len("to_q_bias")]
+            key = prefix + "attention_proj_q_bias"
+            params_ait[key] = arr
+        elif key.endswith("key_weight"):
+            prefix = key[: -len("key_weight")]
+            key = prefix + "attention_proj_k_weight"
+            params_ait[key] = arr
+        elif key.endswith("key_bias"):
+            prefix = key[: -len("key_bias")]
+            key = prefix + "attention_proj_k_bias"
+            params_ait[key] = arr
+        elif key.endswith("value_weight"):
+            prefix = key[: -len("value_weight")]
+            key = prefix + "attention_proj_v_weight"
+            params_ait[key] = arr
+        elif key.endswith("value_bias"):
+            prefix = key[: -len("value_bias")]
+            key = prefix + "attention_proj_v_bias"
+            params_ait[key] = arr
+        elif key.endswith("to_k_weight"):
+            prefix = key[: -len("to_k_weight")]
+            key = prefix + "attention_proj_k_weight"
+            params_ait[key] = arr
+        elif key.endswith("to_v_weight"):
+            prefix = key[: -len("to_v_weight")]
+            key = prefix + "attention_proj_v_weight"
+            params_ait[key] = arr
+        elif key.endswith("to_k_bias"):
+            prefix = key[: -len("to_k_bias")]
+            key = prefix + "attention_proj_k_bias"
+            params_ait[key] = arr
+        elif key.endswith("to_v_bias"):
+            prefix = key[: -len("to_v_bias")]
+            key = prefix + "attention_proj_v_bias"
+            params_ait[key] = arr
+        else:
+            params_ait[key] = arr
+
+    return params_ait
 
 
 def compile_vae(
@@ -79,6 +127,7 @@ def compile_vae(
     width=64,
     use_fp16_acc=False,
     convert_conv_to_gemm=False,
+    name="AutoencoderKL",
 ):
     in_channels = 3
     out_channels = 3
@@ -114,6 +163,10 @@ def compile_vae(
         latent_channels=latent_channels,
         sample_size=sample_size,
     )
+    # batch_size = IntVar(values=[1, 8], name="batch_size")
+    height = IntVar(values=[32, 64], name="height") if USE_CUDA else height
+    width = IntVar(values=[32, 64], name="width") if USE_CUDA else width
+
     ait_input = Tensor(
         shape=[batch_size, height, width, latent_channels],
         name="vae_input",
@@ -122,7 +175,7 @@ def compile_vae(
     ait_vae.name_parameter_tensor()
 
     pt_mod = pt_mod.eval()
-    params_ait = map_vae_params(ait_vae, pt_mod, batch_size, height * width)
+    params_ait = map_vae(pt_mod)
 
     Y = ait_vae.decode(ait_input)
     mark_output(Y)
@@ -133,6 +186,6 @@ def compile_vae(
         Y,
         target,
         "./tmp",
-        "AutoencoderKL",
+        name,
         constants=params_ait,
     )

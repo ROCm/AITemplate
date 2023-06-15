@@ -52,7 +52,67 @@ class ConvTestCase(unittest.TestCase):
         if target.name() == "cuda":
             self.assertTrue(torch.allclose(Y_pt, y_transpose, atol=1e-2, rtol=1e-2))
         else:
-            self.assertTrue(torch.allclose(Y_pt, y_transpose, atol=1.25e-1, rtol=1e-1))
+            torch.testing.assert_close(Y_pt, y_transpose, atol=1.25e-1, rtol=1e-1)
+
+    @parameterized.expand(
+        **filter_test_cases_by_params(
+            {
+                TestEnv.CUDA_LESS_THAN_SM80: [("float16")],
+                TestEnv.CUDA_SM80: [("float32"), ("bfloat16")],
+                TestEnv.ROCM: [("float16")],
+            }
+        )
+    )
+    def test_conv2d(self, dtype):
+        self._test_conv(
+            test_name=f"conv2d_{dtype}",
+            dtype=dtype,
+        )
+        self._test_conv(
+            copy_op=True,
+            test_name=f"conv2d_{dtype}_copy_op",
+            dtype=dtype,
+        )
+
+    @parameterized.expand(
+        **filter_test_cases_by_params(
+            {
+                TestEnv.CUDA_LESS_THAN_SM80: [("float16")],
+                TestEnv.CUDA_SM80: [("float32"), ("bfloat16")],
+                TestEnv.ROCM: [("float16")],
+            }
+        )
+    )
+    def test_conv1d(self, dtype):
+        self._test_conv1d(dtype=dtype, bias=False)
+
+    @parameterized.expand(
+        **filter_test_cases_by_params(
+            {
+                TestEnv.CUDA_LESS_THAN_SM80: [("float16")],
+                TestEnv.CUDA_SM80: [("float32"), ("bfloat16")],
+                TestEnv.ROCM: [("float16")],
+            }
+        )
+    )
+    def test_conv1d_bias(self, dtype):
+        self._test_conv1d(dtype=dtype, bias=True)
+
+    def _test_conv1d(self, dtype, bias):
+        target = detect_target()
+        batch = 4
+        C_in = 80
+        C_out = 512
+        K = 3
+        L = 28
+        stride = 1
+        padding = 1
+        dilation = 1
+        test_name = "test_conv1d"
+
+        X_pt = get_random_torch_tensor([batch, C_in, L], dtype=dtype)
+        W_pt = get_random_torch_tensor([C_out, C_in, K], dtype=dtype)
+        bias_pt = get_random_torch_tensor([C_out], dtype=dtype) if bias else None
 
     def test_fp16(self):
         self._test_fp16()

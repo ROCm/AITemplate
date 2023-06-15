@@ -105,7 +105,8 @@ class concatenate(Operator):
             else:
                 output_dim = input_shapes[0][idx]
                 for shape in input_shapes:
-                    if output_dim != shape[idx]:
+                    # if output_dim != shape[idx]:
+                    if output_dim._attrs["values"] != shape[idx]._attrs["values"]:
                         raise RuntimeError(
                             "tensors expected to have the same dimensions "
                             "except concat_dim! dim: {}, shape1: {}, shape2: {}, inputs: {}".format(
@@ -270,4 +271,7 @@ class concatenate(Operator):
         self._attrs["input_accessors"] = new_input_accessors
 
     def _inputs_for_pseudo_code(self):
-        return self._attrs["inputs"] + [f"dim={self._attrs['concat_dim']}"]
+        return self._attrs["inputs"]
+
+    def _args_for_pseudo_code(self):
+        return [f"dim={self._attrs['concat_dim']}"]

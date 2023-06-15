@@ -12,6 +12,7 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 #
-# flake8: noqa
 
-from aitemplate.frontend.nn.ldm.unet_2d_condition import UNet2DConditionModel
+from aitemplate.backend.rocm.attention import mem_eff_attention
+
+__all__ = ["mem_eff_attention"]

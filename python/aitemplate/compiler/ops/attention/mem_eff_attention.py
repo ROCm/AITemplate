@@ -26,7 +26,6 @@ import numpy as np
 from aitemplate import backend
 from aitemplate.backend import registry
 from aitemplate.compiler.base import IntVar, Operator, Tensor
-from aitemplate.utils import shape_utils
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -114,15 +113,12 @@ class mem_eff_attention(Operator):
             y_shape = self._infer_shape(x_shape, w_shape)
             y_shapes.append(y_shape)
 
-        def unique(vector):
-            return sorted(set(vector))
-
         batch_info = x._attrs["shape"][0]
         output_shape = [
             batch_info,
-            shape_utils.gen_int_var(unique([d[1] for d in y_shapes])),
-            shape_utils.gen_int_var(unique([d[2] for d in y_shapes])),
-            shape_utils.gen_int_var(unique([d[3] for d in y_shapes])),
+            x._attrs["shape"][2],
+            x._attrs["shape"][1],
+            w._attrs["shape"][-1],
         ]
         return output_shape
 
@@ -138,9 +134,15 @@ class mem_eff_attention(Operator):
 
         Parameters
         ----------
-        qkv : float16
-            QKV tensor
-            shape: (b, seqlen, num_heads, Kv)
+        q : float16
+            Q tensor
+            shape: (b, seqlen, num_heads, head_dim)
+        k : float16
+            K tensor
+            shape: (b, seqlen, num_heads, head_dim)
+        v : float16
+            V tensor
+            shape: (b, seqlen, num_heads, head_dim)
 
         Returns
         ----------
@@ -151,11 +153,9 @@ class mem_eff_attention(Operator):
         self._attrs["head_size"] = head_size_v
 
         self._attrs["inputs"] = [q, k, v]
-        if self._attrs["variable_seq_length_kv"]:
-            assert lengths_kv is not None
+        if lengths_kv:
             self._attrs["inputs"].append(lengths_kv)
-        if self._attrs["variable_seq_length_q"]:
-            assert lengths_q is not None
+        if lengths_q:
             self._attrs["inputs"].append(lengths_q)
         self._set_depth()
         self._extract_exec_path(q)

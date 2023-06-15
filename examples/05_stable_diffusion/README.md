@@ -25,18 +25,51 @@ Verify the library versions. We have tested transformers==4.25, diffusers==0.11[
 ### Download the diffusers pipeline files
 You must first register in Hugging Face Hub to obtain an access token for the Stable Diffusion weights. See [user access tokens](https://huggingface.co/docs/hub/security-tokens) for more info. Your access tokens are listed in your [Hugging Face account settings](https://huggingface.co/settings/tokens).
 
+stable-diffusion model has two variants - base and regular.
+For example:
+- `stabilityai/stable-diffusion-2-1-base` - image resolution 512x512
+- `stabilityai/stable-diffusion-2-1` - image resolution 768x768
+
 ```
-python3 scripts/download_pipeline.py --token ACCESS_TOKEN
+python3 scripts/download_pipeline.py \
+--model-name "stabilityai/stable-diffusion-2-1-base" \
+--token ACCESS_TOKEN
 ```
 
 ### Build AIT modules for CLIP, UNet, VAE
 
 Build the AIT modules by running `compile.py`.
 
+Set correct width and height depending on the model variant
 ```
-python3 scripts/compile.py
+python3 scripts/compile.py --width 512 --height 512
 ```
 It generates three folders: `./tmp/CLIPTextModel`, `./tmp/UNet2DConditionModel`, `./tmp/AutoencoderKL`. In each folder, there is a `test.so` file which is the generated AIT module for the model.
+
+#### Alternative build script
+
+```
+python3 scripts/compile_alt.py --width 64 1536 --height 64 1536 --batch-size 1 4 --clip-chunks 6
+```
+This compiles modules with dynamic shape. In the example, modules will work with width in range 64-1536px, batch sizes 1-4. Clip chunks refers to the number of tokens accepted by UNet in multiples of 77, 1 chunk = 77 tokens, 3 chunks = 231 tokens.
+By default, `compile_alt.py` does not include model weights (constants) with the compiled module, to include the model weights in the compiled module use `--include-consants True`.
+
+#### Alternative pipeline
+
+The original pipeline requires a diffusers model local dir, and relies directly on `StableDiffusionPipeline`. This pipeline builds similar functionality without directly using `StableDiffusionPipeline`, and is capable of loading model weights from either diffusers or compvis models to compiled aitemplate modules.
+
+* AITemplate modules are created
+* Model weights are loaded, converted/mapped, then applied to AITemplate module
+* Tokenizer is created from `openai/clip-vit-large-patch14`.
+* Scheduler is created from `hf-hub-or-path`.
+* Loading CLIPTextModel from `ckpt` requires the appropriate `hf-hub-or-path` to be specified i.e. `runwayml/stable-diffusion-v1-5` for SD1.x checkpoints, `stabilityai/stable-diffusion-2-1` for SD2.x checkpoints.
+
+```
+python3 scripts/demo.py --hf-hub-or-path runwayml/stable-diffusion-v1-5 --ckpt v1-5-pruned-emaonly.ckpt
+python3 scripts/demo.py --hf-hub-or-path stabilityai/stable-diffusion-2-1 --ckpt v2-1_768-ema-pruned.ckpt
+```
+
+`--ckpt` takes preference over `--hf-hub-or-path` if both are specified
 
 #### Multi-GPU profiling
 AIT needs to do profiling to select the best algorithms for CUTLASS and CK.
@@ -46,6 +79,7 @@ To enable multiple GPUs for profiling, use the environment variable `CUDA_VISIBL
 
 This step is optional. You can run `benchmark.py` to measure throughput for each of the subnets.
 
+Benchmark script supports base model variant only for now - 512x512
 ```
 python3 src/benchmark.py
 ```
@@ -62,14 +96,16 @@ HUGGINGFACE_AUTH_TOKEN=ACCESS_TOKEN python3 -m unittest src/test_correctness.py
 
 Run AIT models with an example image:
 
+Set correct width and height depending on the model variant
 ```
-python3 scripts/demo.py
+python3 scripts/demo.py --width 512 --height 512
 ```
 
 Img2img demo:
 
+Set correct width and height depending on the model variant
 ```
-python3 scripts/demo_img2img.py
+python3 scripts/demo_img2img.py --width 512 --height 512
 ```
 
 Check the resulted image: `example_ait.png`

@@ -17,6 +17,8 @@ Basic data types of AITemplate.
 """
 from __future__ import annotations
 
+import copy
+
 import math
 
 from abc import ABC, abstractmethod
@@ -742,6 +744,7 @@ class Tensor(Node):
         value: Any = None,
         is_view_of: Any = None,
         is_internal_constant: bool = False,
+        skip_constant_folding: bool = False,
         check_nan_and_inf: bool = False,
         check_outputs: bool = False,
     ) -> None:
@@ -774,6 +777,8 @@ class Tensor(Node):
             Whether this Tensor is a view of another Tensor.
         is_internal_constant: bool, optional
             Whether this constant tensor could be modified.
+        skip_constant_folding: bool, optional
+            Whether this tensor participates in constant folding.
         check_nan_and_inf : bool, optional
             Whether or not to check this tensor is nan or inf during runtime.
         check_outputs : bool, optional
@@ -789,6 +794,7 @@ class Tensor(Node):
         self._attrs["is_input"] = is_input
         self._attrs["is_param"] = False
         self._attrs["is_internal_constant"] = is_internal_constant
+        self._attrs["skip_constant_folding"] = skip_constant_folding
 
         # True if this is an internal tensor that aliases an output through
         # a view. Set up in mark_param_tensor
@@ -940,6 +946,12 @@ class Tensor(Node):
             )
         self._attrs["data"] = data
 
+    def __deepcopy__(self, memo):
+        result = Tensor(self.shape())
+        memo[id(self)] = result
+        result._attrs = copy.deepcopy(self._attrs, memo)
+        return result
+
     def __add__(self, other: Any) -> Tensor:
         return OP_REGISTRY.get("ADD")(self, other)
 
@@ -1032,6 +1044,12 @@ class IntVarTensor(Tensor):
     def pseudo_code(self, with_shape=True) -> str:
         return f"IntVarTensor({self._attrs['int_var'].pseudo_code()})"
 
+    def __deepcopy__(self, memo):
+        result = IntVarTensor(self._attrs["int_var"])
+        memo[id(self)] = result
+        result._attrs = copy.deepcopy(self._attrs, memo)
+        return result
+
     def __add__(self, other: Any) -> Tensor:
         return OP_REGISTRY.get("INT_ADD")(self, other)
 
@@ -1107,6 +1125,12 @@ class Operator(Node):
         NotImplementedError
         """
         raise NotImplementedError
+
+    def __deepcopy__(self, memo):
+        result = type(self)(**self._get_op_attributes())
+        memo[id(self)] = result
+        result._attrs = copy.deepcopy(self._attrs, memo)
+        return result
 
     def _set_depth(self) -> None:
         """
@@ -1227,7 +1251,7 @@ class Operator(Node):
         return self._attrs["outputs"]
 
     def _args_for_pseudo_code(self):
-        return []
+        return [f"{key}={value}" for key, value in self._get_op_attributes().items()]
 
     def _pseudo_code_helper(self, node: Any, with_shape: bool) -> str:
         if isinstance(node, list):

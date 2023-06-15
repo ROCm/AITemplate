@@ -623,6 +623,14 @@ def stack_mapper(node: torch.fx.Node, _: nn.Module) -> torch.fx.Node:
 @register_acc_op_properties(AccOpProperty.pointwise)
 @register_acc_op_mapping(op_and_target=("call_function", torch.clamp))
 @register_acc_op_mapping(op_and_target=("call_function", torch.clip))
+@register_acc_op_mapping(
+    op_and_target=("call_function", nn.functional.hardtanh),
+    arg_replacement_tuples=[
+        ("input", "input"),
+        ("min_val", "min"),
+        ("max_val", "max"),
+    ],
+)
 @register_acc_op_mapping(op_and_target=("call_method", "clamp"))
 @register_acc_op_mapping(op_and_target=("call_method", "clip"))
 @register_acc_op
@@ -882,15 +890,6 @@ def dropout_mapper(node: torch.fx.Node, mod: nn.Module):
     Remove dropout node and directly map its input to output.
     """
     return node.kwargs["input"]
-
-
-@register_acc_op_properties(AccOpProperty.pointwise, AccOpProperty.unary)
-@register_acc_op_mapping(
-    op_and_target=("call_function", nn.functional.hardtanh),
-)
-@register_acc_op
-def hardtanh(*, input, min_val=-1.0, max_val=1.0):
-    return nn.functional.hardtanh(input=input, min_val=min_val, max_val=max_val)
 
 
 @register_acc_op_properties(AccOpProperty.pointwise, AccOpProperty.unary)
@@ -1382,7 +1381,7 @@ def std_mapper(node, mod):
         mean_kwargs = {
             "input": input_node,
             "dim": dim,
-            "keepdim": keepdim,
+            "keepdim": True,
         }
         mean_node = node.graph.call_function(mean, kwargs=mean_kwargs)
         mean_node.meta["type"] = torch.Tensor
@@ -1400,7 +1399,7 @@ def std_mapper(node, mod):
         }
         pow_node = node.graph.call_function(pow, kwargs=pow_kwargs)
         pow_node.meta["type"] = torch.Tensor
-        # sum(pow(X-mean(X))))/N
+        # mean(pow(X-mean(X)))
         post_mean_kwargs = {
             "input": pow_node,
             "dim": dim,
@@ -1408,7 +1407,7 @@ def std_mapper(node, mod):
         }
         post_mean_node = node.graph.call_function(mean, kwargs=post_mean_kwargs)
         post_mean_node.meta["type"] = torch.Tensor
-        # sqrt(sum(pow(X-mean(X))))/N)
+        # sqrt( mean(pow(X-mean(X))) )
         sqrt_kwargs = {
             "input": post_mean_node,
         }
@@ -3352,6 +3351,12 @@ def new_zeros(*, input, size, dtype=None, device=None, requires_grad=False):
 @register_acc_op
 def zeros_like(*, input, dtype=None, device=None):
     return torch.zeros_like(input=input, dtype=dtype, device=device)
+
+
+@register_acc_op_mapping(op_and_target=("call_function", torch.masked_select))
+@register_acc_op
+def masked_select(*, input, mask):
+    return torch.masked_select(input=input, mask=mask)
 
 
 ###############################################################################
