@@ -6,8 +6,8 @@
 	url = https://github.com/NVIDIA/cub.git
 [submodule "3rdparty/composable_kernel"]
 	path = 3rdparty/composable_kernel
-	url = https://github.com/aska-0096/navi3x_ck.git
-	branch = e2e_kernellib
+	url = https://github.com/ROCmSoftwarePlatform/composable_kernel.git
+	branch = navi3_rel
 [submodule "3rdparty/picojson"]
 	path = 3rdparty/picojson
 	url = https://github.com/kazuho/picojson.git
