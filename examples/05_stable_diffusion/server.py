@@ -2,7 +2,7 @@
 from fastapi import FastAPI
 from typing import List,Union
 from pydantic import BaseModel
-from src.pipeline_stable_diffusion_ait import StableDiffusionAITPipeline
+from src.pipeline_stable_diffusion_ait_ui import StableDiffusionAITPipeline
 import torch
 from tqdm import tqdm
 from PIL import Image
