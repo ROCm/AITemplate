@@ -35,7 +35,7 @@ from src.compile_lib.compile_vae import compile_vae
     default="./tmp/diffusers-pipeline/runwayml/stable-diffusion-v1-5",
     help="the local diffusers pipeline directory",
 )
-@click.option("--is-remove-resnet-pre-silu", default=False, help="whether remove resnet-pre-silu or not")
+@click.option("--is-remove-resnet-pre-silu", default=True, help="whether remove resnet-pre-silu or not")
 @click.option("--width", default=512, help="Width of generated image")
 @click.option("--height", default=512, help="Height of generated image")
 @click.option("--batch-size", default=1, help="batch size")
