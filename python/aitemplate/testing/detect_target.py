@@ -88,6 +88,8 @@ def _detect_rocm():
         proc = Popen(["rocminfo"], stdout=PIPE, stderr=PIPE)
         stdout, stderr = proc.communicate()
         stdout = stdout.decode("utf-8")
+        if "gfx1100" in stdout:
+            return "gfx1100"
         if "gfx90a" in stdout:
             return "gfx90a"
         if "gfx908" in stdout:

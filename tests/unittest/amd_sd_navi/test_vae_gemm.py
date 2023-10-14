@@ -21,7 +21,6 @@ from aitemplate.compiler.base import IntImm
 from aitemplate.frontend import Tensor
 from aitemplate.testing import detect_target
 from aitemplate.testing.test_utils import (
-    env_variables,
     filter_test_cases_by_test_env,
     get_random_torch_tensor,
     get_torch_empty_tensor,
@@ -75,82 +74,9 @@ class GEMMBiasTestCase(unittest.TestCase):
             else:
                 torch.testing.assert_close(Y_pt, y, **tolerance_limits)
 
-    def test_rcr_zero_size(self):
-        target = detect_target()
-        if target.name() == "cuda":
-            # This test triggered a c10 assertion failure internally
-            # caffe2/c10/util/SmallVector.h:338:
-            # Assertion `idx < size()' failed
-            if type(target).__name__ != "FBCUDA":
-                self._test_rcr([2], N=64, K=0, test_name="zero_k")
-            self._test_rcr([2], N=0, K=4, test_name="zero_n")
-            self._test_rcr([0], N=4, K=4, test_name="zero_m")
-
-    @unittest.skipIf(detect_target().name() == "rocm", "Not supported by ROCM.")
-    def test_rcr_static(self):
-        self._test_rcr([4096], N=4, K=4, test_name="static")
-        self._test_rcr([1000], N=81, K=1024, test_name="static")
-        self._test_rcr([67200], N=3, K=256, test_name="static")
-
     def test_rcr_static_rocm(self):
-        self._test_rcr([4096], N=4, K=4, test_name="static")
-        self._test_rcr([1000], N=81, K=1024, test_name="static")
-        self._test_rcr([67200], N=3, K=256, test_name="static")
-
-    @unittest.skipIf(detect_target().name() == "rocm", "Not supported by ROCM.")
-    def test_rcr_bfloat16_bf16(self):
-        dtype = "bfloat16"
-        self._test_rcr([4], N=2, K=11, test_name=f"static_{dtype}", dtype=dtype)
-        self._test_rcr([128], N=64, K=1024, test_name=f"static_{dtype}", dtype=dtype)
-        self._test_rcr(
-            [1, 7, 64, 127],
-            N=64,
-            K=1024,
-            test_name=f"dynamic_m_{dtype}",
-            dtype=dtype,
-        )
-
-    def test_rcr_sm90(self) -> None:
-        with env_variables(
-            AIT_FORCE_CUTLASS_SM90_KERNELS="1",
-            INSIDE_RE_WORKER="1",
-            FORCE_PROFILE="1",
-        ):
-            with self.assertRaisesRegex(
-                expected_exception=RuntimeError,
-                expected_regex="No GEMM op instances are left after filtering",
-            ):
-                # alignment < 8 not supported by SM90 kernels
-                # use alignment 4 to avoid auto-padding to 8
-                self._test_rcr(
-                    Ms=[128],
-                    N=32,
-                    K=28,
-                    test_name="wrong_alignment_force_sm90",
-                    dtype="float16",
-                )
-
-            self._test_rcr(
-                Ms=[128],
-                N=32,
-                K=32,
-                test_name="static_fp16_force_sm90",
-                dtype="float16",
-            )
-            self._test_rcr(
-                Ms=[128],
-                N=32,
-                K=32,
-                test_name="static_fp32_force_sm90",
-                dtype="float32",
-            )
-            self._test_rcr(
-                Ms=[128],
-                N=32,
-                K=32,
-                test_name="static_bf16_force_sm90",
-                dtype="bfloat16",
-            )
+        self._test_rcr([64], N=1536, K=512, test_name="static")
+        self._test_rcr([64], N=512, K=512, test_name="static")
 
 
 filter_test_cases_by_test_env(GEMMBiasTestCase)

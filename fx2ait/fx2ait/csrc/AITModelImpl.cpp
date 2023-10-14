@@ -21,14 +21,17 @@
 
 #include "ATen/Context.h" // @manual
 #ifdef __HIP_PLATFORM_HCC__
+#include "rocm_device_functions.h"
 #include "ATen/hip/HIPContext.h"
 #include "c10/core/CPUAllocator.h"
 #include "c10/hip/HIPStream.h"
 #else
+#include "cuda_device_functions.h"
 #include "ATen/cuda/CUDAContext.h"
 #include "c10/core/CPUAllocator.h"
 #include "c10/cuda/CUDAStream.h"
 #endif
+
 
 #ifdef FBCODE_AIT
 #include "folly/MapUtil.h"
@@ -646,6 +649,7 @@ void AITModelImpl::updateConstantsWithWeights(
     constants.emplace_back(torchToAitData(it->second));
   }
 
+<<<<<<< HEAD
 #ifdef __HIP_PLATFORM_HCC__
   hipStream_t constants_stream;
   TORCH_CHECK(
@@ -667,6 +671,15 @@ void AITModelImpl::updateConstantsWithWeights(
       decltype(&cudaStreamDestroy)>;
   StreamGuard constants_stream_guard{constants_stream, cudaStreamDestroy};
 #endif
+=======
+  ait::StreamType constants_stream;
+  ait::StreamCreate(&constants_stream, true);
+  using StreamGuard = std::unique_ptr<
+      std::remove_pointer_t<ait::StreamType>,
+      decltype(&ait::StreamDestroy)>;
+  StreamGuard constants_stream_guard{constants_stream, ait::StreamDestroy};
+
+>>>>>>> origin/navi3_rel_ver_1.0
   AIT_CHECK(setManyConstantsDoubleBufferFunc_(
       model_handle_,
       /*stream=*/reinterpret_cast<AITemplateStreamOpaque*>(constants_stream),

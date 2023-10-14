@@ -59,6 +59,7 @@ class Target:
             Absolute path to the AIT static/ directory
         """
         self._target_type = -1
+        self._device_name = ""
         self._template_path = ""
         self._compile_cmd = ""
         self._cache_path = ""
@@ -84,7 +85,7 @@ class Target:
         self._load_profile_cache()
         global CURRENT_TARGET
         if CURRENT_TARGET is not None:
-            raise RuntimeError("Target has been set.")
+            raise RuntimeError(f"Target has been set {CURRENT_TARGET}")
         assert self._target_type > 0
         CURRENT_TARGET = self
 
@@ -137,6 +138,22 @@ class Target:
             The name of the target.
         """
         return TargetType(self._target_type).name
+
+    def get_device_name(self) -> str:
+        """Return the device name of the target.
+        
+        Returns
+        -------
+        str
+            The device name of the target.
+        """
+        from ..testing.detect_target import _detect_cuda, _detect_rocm
+
+        if self.name() == "rocm":
+            self._device_name = _detect_rocm()
+        else:
+            self._device_name = _detect_cuda()
+        return self._device_name
 
     def cc(self):
         """Compiler for this target.

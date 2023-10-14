@@ -48,24 +48,26 @@ Conv2DSpecializationTag = {
 }
 
 
-class XdlOpType(enum.Enum):
+class OpType(enum.Enum):
     DeviceConv2d_Xdl_CShuffle = auto()
     DeviceConv2d_Xdl_CShuffle_Bias_Relu = auto()
     DeviceConv2d_Xdl_CShuffle_Bias_Relu_Add = auto()
     DeviceConv2d_Xdl_CShuffle_Bias_Sigmoid = auto()
     DeviceGroupedConv2D_Xdl_CShuffle_Bias_Relu = auto()
+    DeviceGroupedConv2D_Wmma_CShuffle_Bias_Relu = auto()
     DeviceConvNdBwdDataNwcKxcNwk_Xdl = auto()
     DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1 = auto()
 
 
-XdlOpTag = {
-    XdlOpType.DeviceConv2d_Xdl_CShuffle: "ck::tensor_operation::device::DeviceConv2dFwdXdl_C_Shuffle_Input_N_Hi_Wi_C_Weight_K_Y_X_C_Output_N_Ho_Wo_K",
-    XdlOpType.DeviceConv2d_Xdl_CShuffle_Bias_Relu: "ck::tensor_operation::device::DeviceConv2dFwdXdl_C_Shuffle_Bias_Activation_Input_N_Hi_Wi_C_Weight_K_Y_X_C_Output_N_Ho_Wo_K",
-    XdlOpType.DeviceConv2d_Xdl_CShuffle_Bias_Relu_Add: "ck::tensor_operation::device::DeviceConv2dFwdXdl_C_Shuffle_Bias_Activation_Add_Input_N_Hi_Wi_C_Weight_K_Y_X_C_Output_N_Ho_Wo_K",
-    XdlOpType.DeviceConv2d_Xdl_CShuffle_Bias_Sigmoid: "ck::tensor_operation::device::DeviceConv2dFwdXdl_C_Shuffle_Bias_Activation_Input_N_Hi_Wi_C_Weight_K_Y_X_C_Output_N_Ho_Wo_K",
-    XdlOpType.DeviceGroupedConv2D_Xdl_CShuffle_Bias_Relu: "ck::tensor_operation::device::DeviceGroupedConvFwdMultipleD_Xdl_CShuffle",
-    XdlOpType.DeviceConvNdBwdDataNwcKxcNwk_Xdl: "ck::tensor_operation::device::DeviceConvNdBwdDataNwcKxcNwk_Xdl",
-    XdlOpType.DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1: "ck::tensor_operation::device::DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1",
+OpTag = {
+    OpType.DeviceConv2d_Xdl_CShuffle: "ck::tensor_operation::device::DeviceConv2dFwdXdl_C_Shuffle_Input_N_Hi_Wi_C_Weight_K_Y_X_C_Output_N_Ho_Wo_K",
+    OpType.DeviceConv2d_Xdl_CShuffle_Bias_Relu: "ck::tensor_operation::device::DeviceConv2dFwdXdl_C_Shuffle_Bias_Activation_Input_N_Hi_Wi_C_Weight_K_Y_X_C_Output_N_Ho_Wo_K",
+    OpType.DeviceConv2d_Xdl_CShuffle_Bias_Relu_Add: "ck::tensor_operation::device::DeviceConv2dFwdXdl_C_Shuffle_Bias_Activation_Add_Input_N_Hi_Wi_C_Weight_K_Y_X_C_Output_N_Ho_Wo_K",
+    OpType.DeviceConv2d_Xdl_CShuffle_Bias_Sigmoid: "ck::tensor_operation::device::DeviceConv2dFwdXdl_C_Shuffle_Bias_Activation_Input_N_Hi_Wi_C_Weight_K_Y_X_C_Output_N_Ho_Wo_K",
+    OpType.DeviceGroupedConv2D_Xdl_CShuffle_Bias_Relu: "ck::tensor_operation::device::DeviceGroupedConvFwdMultipleD_Xdl_CShuffle",
+    OpType.DeviceGroupedConv2D_Wmma_CShuffle_Bias_Relu: "ck::tensor_operation::device::DeviceGroupedConvFwdMultipleD_Wmma_CShuffle",
+    OpType.DeviceConvNdBwdDataNwcKxcNwk_Xdl: "ck::tensor_operation::device::DeviceConvNdBwdDataNwcKxcNwk_Xdl",
+    OpType.DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1: "ck::tensor_operation::device::DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1",
 }
 
 
@@ -122,7 +124,8 @@ class GroupTileDesc:
         template = jinja2.Template(
             """
 {%for key, value in param.items() %}
-    {{value}}, // {{key}}
+{% if value!=0 %}   {{value}}, // {{key}}
+    {% endif %}
 {% endfor %}
 """,
             trim_blocks=True,
@@ -228,7 +231,7 @@ class CBlockTransferDesc:
 class Conv2DOperation:
     operation_kind: library.Conv2dKind
     extra_kind: library.TensorOperation
-    xdl_op_type: XdlOpType
+    op_type: OpType
     A: library.TensorDesc
     B: library.TensorDesc
     C: library.TensorDesc
@@ -268,9 +271,9 @@ class Conv2DOperation:
     def emit(self) -> str:
         template = jinja2.Template(
             """
-using {{name}} = {{xdl_op_type}}<
+using {{name}} = {{op_type}}<
     2, // NDimSpatial
-{% if "DeviceConvNdBwdDataNwcKxcNwk_Xdl" in xdl_op_type %}
+{% if "DeviceConvNdBwdDataNwcKxcNwk_Xdl" in op_type %}
     {{ADType}}, // InDataType
     {{BDType}}, // WeiDataType
     {{CDType}}, // OutDataType
@@ -287,7 +290,7 @@ using {{name}} = {{xdl_op_type}}<
     {% elif func in ["AA", "AAR"] %}
     ck::Tuple<{{OutLayout}}, {{OutLayout}}>, // BiasLayout
     {% else %}
-{% if "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1" in xdl_op_type %}
+{% if "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1" in op_type %}
     ck::Tuple<ck::tensor_layout::convolution::G_C>, // BiasLayouts
 {% else %}
     ck::Tuple<{{OutLayout}}>, // BiasLayout
@@ -312,7 +315,7 @@ using {{name}} = {{xdl_op_type}}<
     {{epilogue_functor}},
 
     {{Conv2DSpecialization}},
-{% if "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1" in xdl_op_type %}
+{% if "DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffle_v1" in op_type %}
     true,
     true,
     1,
@@ -323,7 +326,7 @@ using {{name}} = {{xdl_op_type}}<
     {{tile_config}}
     {{a_block_transfer}}
     {{b_block_transfer}}
-{% if "DeviceConvNdBwdDataNwcKxcNwk_Xdl" in xdl_op_type %}
+{% if "DeviceConvNdBwdDataNwcKxcNwk_Xdl" in op_type %}
     7, // CThreadTransferSrcDstVectorDim
     1 // GemmCThreadTransferDstScalarPerVector
 {% else %}
@@ -334,7 +337,7 @@ using {{name}} = {{xdl_op_type}}<
         )
         return template.render(
             name=self.__str__(),
-            xdl_op_type=XdlOpTag[self.xdl_op_type],
+            op_type=OpTag[self.op_type],
             InLayout=library.LayoutTag[self.A.layout],
             WeiLayout=library.LayoutTag[self.B.layout],
             OutLayout=library.LayoutTag[self.C.layout],
@@ -364,7 +367,7 @@ if __name__ == "__main__":
     Conv2DOp = Conv2DOperation(
         operation_kind=library.Conv2dKind.Conv2d,
         extra_kind=library.TensorOperation.PassThrough,
-        xdl_op_type=XdlOpType.DeviceConv2d_Xdl_CShuffle,
+        op_type=OpType.DeviceConv2d_Xdl_CShuffle,
         A=A,
         B=B,
         C=C,

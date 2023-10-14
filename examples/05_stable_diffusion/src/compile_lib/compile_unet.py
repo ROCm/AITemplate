@@ -64,12 +64,14 @@ def compile_unet(
     attention_head_dim=[5, 10, 20, 20],  # noqa: B006
     model_name="UNet2DConditionModel",
     use_linear_projection=False,
+    is_remove_resnet_pre_silu=False
 ):
     ait_mod = ait_UNet2DConditionModel(
         sample_size=64,
         cross_attention_dim=hidden_dim,
         attention_head_dim=attention_head_dim,
         use_linear_projection=use_linear_projection,
+        is_remove_resnet_pre_silu=is_remove_resnet_pre_silu
     )
     ait_mod.name_parameter_tensor()
 

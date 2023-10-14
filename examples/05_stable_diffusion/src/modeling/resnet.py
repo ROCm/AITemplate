@@ -135,6 +135,7 @@ class ResnetBlock2D(nn.Module):
         use_nin_shortcut=None,
         up=False,
         down=False,
+        is_remove_resnet_pre_silu=False,
     ):
         super().__init__()
         self.pre_norm = pre_norm
@@ -147,7 +148,8 @@ class ResnetBlock2D(nn.Module):
         self.up = up
         self.down = down
         self.output_scale_factor = output_scale_factor
-
+        self.is_remove_resnet_pre_silu = is_remove_resnet_pre_silu
+        
         if groups_out is None:
             groups_out = groups
 
@@ -215,8 +217,23 @@ class ResnetBlock2D(nn.Module):
         hidden_states = self.conv1(hidden_states)
 
         if temb is not None:
-            temb = self.time_emb_proj(ops.silu(temb))
-            bs, dim = temb.shape()
+#<<<<<<< HEAD
+#            temb = self.time_emb_proj(ops.silu(temb))
+#            bs, dim = temb.shape()
+#=======
+#            if self.is_remove_resnet_pre_silu:
+#                temb = self.time_emb_proj(temb)
+#            else:
+#                temb = self.time_emb_proj(ops.silu(temb))
+#            bs, dim = get_shape(temb)
+#>>>>>>> origin/navi3_rel_ver_1.0
+
+            if self.is_remove_resnet_pre_silu:
+                temb = self.time_emb_proj(temb)
+            else:
+                temb = self.time_emb_proj(ops.silu(temb))
+            bs, dim = get_shape(temb)
+            
             temb = ops.reshape()(temb, [bs, 1, 1, dim])
             hidden_states = hidden_states + temb
 

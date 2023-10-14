@@ -24,7 +24,7 @@ import jinja2
 INSTANCE_TEMPLATE = jinja2.Template(
     """
 using {{name}} = ck::tensor_operation::device::DevicePool2dFwd_Input_N_Hi_Wi_C_Output_N_Ho_Wo_C<
-ck::half_t, ck::half_t, float, {{reduce_func}}, false, 64, 64, 1, 4, 1, 4>;
+ck::half_t, ck::half_t, int32_t, float, {{reduce_func}}, false, 64, 64, 1, 4, 1, 4>;
 """
 )
 
@@ -35,14 +35,16 @@ EXEC_TEMPLATE = jinja2.Template(
 {{indent}}auto argument_ptr = op.MakeArgumentPointer(static_cast<ck::half_t *>(in_ptr),
 {{indent}}                                           static_cast<ck::half_t *>(out_ptr),
 {{indent}}                                           nullptr,
-{{indent}}                                           *batch,
-{{indent}}                                           *in_ch,
 {{indent}}                                           input_shape,
 {{indent}}                                           kernel_shape,
 {{indent}}                                           output_shape,
+{{indent}}                                           {},
+{{indent}}                                           {},
+{{indent}}                                           {},
 {{indent}}                                           conv_filter_strides,
 {{indent}}                                           input_left_pads,
-{{indent}}                                           input_right_pads);
+{{indent}}                                           input_right_pads,
+{{indent}}                                           {2, 3} );
 {{indent}}if(!op.IsSupportedArgument(argument_ptr.get())) {
 {{indent}}  LOG(FATAL) << "wrong! " << op.GetTypeString() << " with the specified compilation parameters does not support this Pool problem.";
 {{indent}}}
@@ -59,7 +61,6 @@ SRC_TEMPLATE = jinja2.Template(
 #include <cstdlib>
 #include <stdlib.h>
 #include "logging.h"
-#include "include/ck/utility/print.hpp"
 #include "library/include/ck/library/utility/device_memory.hpp"
 #include "library/include/ck/library/utility/host_tensor.hpp"
 #include "library/include/ck/library/utility/host_tensor_generator.hpp"
@@ -88,17 +89,21 @@ void {{function_name}}(
     ) {
   {{shape_function}}
 
-  const std::array<ck::index_t, 2> conv_filter_strides{static_cast<ck::index_t>(stride),
+  const std::vector<ck::index_t> conv_filter_strides{static_cast<ck::index_t>(stride),
     static_cast<ck::index_t>(stride)};
-  const std::array<ck::index_t, 2> input_left_pads{static_cast<ck::index_t>(pad),
+  const std::vector<ck::index_t> input_left_pads{static_cast<ck::index_t>(pad),
     static_cast<ck::index_t>(pad)};
-  const std::array<ck::index_t, 2> input_right_pads{static_cast<ck::index_t>(pad),
+  const std::vector<ck::index_t> input_right_pads{static_cast<ck::index_t>(pad),
     static_cast<ck::index_t>(pad)};
-  const std::array<ck::index_t, 2> input_shape{static_cast<ck::index_t>(*in_h),
+  const std::vector<ck::index_t> input_shape{static_cast<ck::index_t>(*batch),
+    static_cast<ck::index_t>(*in_ch),
+    static_cast<ck::index_t>(*in_h),
     static_cast<ck::index_t>(*in_w)};
-  const std::array<ck::index_t, 2> kernel_shape{static_cast<ck::index_t>(kernel_h),
+  const std::vector<ck::index_t> kernel_shape{static_cast<ck::index_t>(kernel_h),
     static_cast<ck::index_t>(kernel_w)};
-  const std::array<ck::index_t, 2> output_shape{static_cast<ck::index_t>(*out_h),
+  const std::vector<ck::index_t> output_shape{static_cast<ck::index_t>(*batch),
+    static_cast<ck::index_t>(*in_ch),
+    static_cast<ck::index_t>(*out_h),
     static_cast<ck::index_t>(*out_w)};
 
   {{exec_paths}}

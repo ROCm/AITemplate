@@ -95,7 +95,7 @@ class ConvBiasTestCase(unittest.TestCase):
             torch.testing.assert_close(Y_pt, y_transpose, atol=1.25e-1, rtol=1e-1)
 
     @parameterized.expand(
-        **filter_test_cases_by_params(
+        filter_test_cases_by_params(
             {
                 # TestEnv.CUDA_LESS_THAN_SM80: [("float16")],
                 # TestEnv.CUDA_SM80: [("float32"), ("bfloat16")],
@@ -104,58 +104,6 @@ class ConvBiasTestCase(unittest.TestCase):
         )
     )
     def test_conv2d_bias(self, dtype):
-        # default
-        self._test_conv_bias(
-            test_name=f"conv2d_bias_{dtype}",
-            dtype=dtype,
-        )
-        self._test_conv_bias(
-            copy_op=True,
-            test_name=f"conv2d_bias_{dtype}_copy_op",
-            dtype=dtype,
-        )
-        # unet model test
-        # Not implemented yet
-        # vae_model_conv = [
-        #     [64 ,64 ,1, 1, 4, 4],
-        #     [64 ,64 ,3, 3, 512, 4],
-        #     [64 ,64 ,3, 3, 512, 512],
-        #     [128 ,128 ,3, 3, 512, 512],
-        #     [256 ,256 ,3, 3, 512, 512],
-        #     [256 ,256 ,3, 3, 256, 512],
-        #     [256 ,256 ,3, 3, 256, 256],
-        #     [256 ,256 ,3, 3, 512, 256],
-        #     [512 ,512 ,3, 3, 256, 256],
-        #     [512 ,512 ,3, 3, 128, 256],
-        #     [512 ,512 ,3, 3, 128, 128],
-        #     [512 ,512 ,3, 3, 128, 3],
-        # ]
-        # test_conv_cnt = 0
-        # for configs in vae_model_conv:
-        #     self._test_conv_bias(
-        #         input_dim_x=configs[0],
-        #         input_dim_y=configs[1],
-        #         weight_dim_x=configs[2],
-        #         weight_dim_y=configs[3],
-        #         input_channels=configs[4],
-        #         output_channels=configs[5],
-        #         copy_op=False,
-        #         test_name=f"conv2d_bias_{dtype}_{test_conv_cnt}",
-        #         dtype=dtype,
-        #     )
-            
-        #     self._test_conv_bias(
-        #         input_dim_x=configs[0],
-        #         input_dim_y=configs[1],
-        #         weight_dim_x=configs[2],
-        #         weight_dim_y=configs[3],
-        #         input_channels=configs[4],
-        #         output_channels=configs[5],
-        #         copy_op=True,
-        #         test_name=f"conv2d_bias_{dtype}_{test_conv_cnt}_copy_op",
-        #         dtype=dtype,
-        #     )
-            
         # vae model test
         vae_model_conv = [
             [64 ,64 ,1, 1, 4, 4],

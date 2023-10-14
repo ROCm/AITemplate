@@ -31,7 +31,7 @@ from src.compile_lib.compile_vae_alt import compile_vae
 @click.command()
 @click.option(
     "--local-dir",
-    default="./tmp/diffusers-pipeline/runwayml/stable-diffusion-v1-5",
+    default="./tmp/diffusers-pipeline/stabilityai/stable-diffusion-v2",
     help="the local diffusers pipeline directory",
 )
 @click.option(

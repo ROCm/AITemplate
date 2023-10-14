@@ -20,9 +20,11 @@ from aitemplate.testing.benchmark_pt import benchmark_torch_function
 from aitemplate.utils.import_path import import_parent
 from diffusers import EulerDiscreteScheduler
 
+EulerDiscreteScheduler.latent_scales = [1./((sigma**2 + 1) ** 0.5) for sigma in EulerDiscreteScheduler.sigmas]
+
 if __name__ == "__main__":
     import_parent(filepath=__file__, level=1)
-
+#from src.utils import *
 from src.pipeline_stable_diffusion_ait import StableDiffusionAITPipeline
 
 
@@ -51,6 +53,7 @@ def run(local_dir, width, height, batch, prompt, negative_prompt, benchmark):
     ).to("cuda")
 
     prompt = [prompt] * batch
+    pipe.loadResources()
     with torch.autocast("cuda"):
         images = pipe(prompt, height, width).images
         if benchmark:
