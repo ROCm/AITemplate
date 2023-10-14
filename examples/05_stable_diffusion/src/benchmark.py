@@ -54,6 +54,7 @@ def benchmark_unet(
     hidden_dim=1024,
     benchmark_pt=False,
     verify=False,
+    profile_op=False,
 ):
     exe_module = Model("./tmp/UNet2DConditionModel/test.so")
     if exe_module is None:
@@ -116,6 +117,10 @@ def benchmark_unet(
     exe_module.benchmark_with_tensors(inputs, ys, count=100, repeat=4)
     # benchmark
     t, _, _ = exe_module.benchmark_with_tensors(inputs, ys, count=100, repeat=4)
+    
+    if profile_op:
+        exe_module.profile_with_tensors(inputs, ys, num_iters=3, filename=f"profile_unet_bs{batch_size}.txt")
+    
     with open("sd_ait_benchmark.txt", "a") as f:
         f.write(f"unet batch_size: {batch_size}, latency: {t} ms\n")
 
@@ -127,6 +132,7 @@ def benchmark_clip(
     tokenizer=None,
     benchmark_pt=False,
     verify=False,
+    profile_op=False,
 ):
     exe_module = Model("./tmp/CLIPTextModel/test.so")
     if exe_module is None:
@@ -191,12 +197,16 @@ def benchmark_clip(
     exe_module.benchmark_with_tensors(inputs, ys, count=100, repeat=4)
     # benchmark
     t, _, _ = exe_module.benchmark_with_tensors(inputs, ys, count=100, repeat=4)
+    
+    if profile_op:
+        exe_module.profile_with_tensors(inputs, ys, num_iters=3, filename=f"profile_clip_bs{batch_size}.txt")
+        
     with open("sd_ait_benchmark.txt", "a") as f:
         f.write(f"clip batch_size: {batch_size}, latency: {t} ms\n")
 
 
 def benchmark_vae(
-    pt_vae, batch_size=1, height=64, width=64, benchmark_pt=False, verify=False
+    pt_vae, batch_size=1, height=64, width=64, benchmark_pt=False, verify=False, profile_op=False,
 ):
     latent_channels = 4
 
@@ -257,6 +267,10 @@ def benchmark_vae(
     t, _, _ = exe_module.benchmark_with_tensors(
         [ait_input_pt_tensor], [y], count=100, repeat=4
     )
+    
+    if profile_op:
+        exe_module.profile_with_tensors([ait_input_pt_tensor], [y], num_iters=3, filename=f"profile_vae_bs{batch_size}.txt")
+    
     with open("sd_ait_benchmark.txt", "a") as f:
         f.write(f"vae batch_size: {batch_size}, latency: {t} ms\n")
 
@@ -270,7 +284,8 @@ def benchmark_vae(
 @click.option("--batch-size", default=1, help="batch size")
 @click.option("--verify", type=bool, default=False, help="verify correctness")
 @click.option("--benchmark-pt", type=bool, default=False, help="run pt benchmark")
-def benchmark_diffusers(local_dir, batch_size, verify, benchmark_pt):
+@click.option("--profile-op", type=bool, default=True, help="profile model on op level")
+def benchmark_diffusers(local_dir, batch_size, verify, benchmark_pt, profile_op):
     assert batch_size == 1, "batch size must be 1 for submodule verification"
     logging.getLogger().setLevel(logging.INFO)
     np.random.seed(0)
@@ -288,6 +303,7 @@ def benchmark_diffusers(local_dir, batch_size, verify, benchmark_pt):
         batch_size=batch_size,
         benchmark_pt=benchmark_pt,
         verify=verify,
+        profile_op=profile_op,
     )
     # UNet
     benchmark_unet(
@@ -296,13 +312,18 @@ def benchmark_diffusers(local_dir, batch_size, verify, benchmark_pt):
         benchmark_pt=benchmark_pt,
         verify=verify,
         hidden_dim=pipe.text_encoder.config.hidden_size,
+        profile_op=profile_op,
     )
     # VAE
     benchmark_vae(
+#<<<<<<< HEAD
         pipe.vae,
         batch_size=batch_size,
         benchmark_pt=benchmark_pt,
         verify=verify,
+#=======
+#        pipe.vae, batch_size=batch_size, benchmark_pt=benchmark_pt, verify=verify, profile_op=profile_op,
+#>>>>>>> origin/navi3_rel_ver_1.0
     )
 
 

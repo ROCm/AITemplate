@@ -13,8 +13,6 @@
 #  limitations under the License.
 #
 import inspect
-import threading
-import time
 
 import os
 import warnings
@@ -25,17 +23,16 @@ from aitemplate.compiler import Model
 
 from diffusers import (
     AutoencoderKL,
-    # DDIMScheduler,
-    # DPMSolverMultistepScheduler,
-    # EulerAncestralDiscreteScheduler,
-    # EulerDiscreteScheduler,
-    # LMSDiscreteScheduler,
-    # PNDMScheduler,
+    DDIMScheduler,
+    DPMSolverMultistepScheduler,
+    EulerAncestralDiscreteScheduler,
+    EulerDiscreteScheduler,
+    LMSDiscreteScheduler,
+    PNDMScheduler,
     StableDiffusionPipeline,
     UNet2DConditionModel,
 )
 
-from .utils import *
 from diffusers.pipelines.stable_diffusion import (
     StableDiffusionPipelineOutput,
     StableDiffusionSafetyChecker,
@@ -43,21 +40,6 @@ from diffusers.pipelines.stable_diffusion import (
 
 from transformers import CLIPFeatureExtractor, CLIPTextModel, CLIPTokenizer
 
-
-class MyThread(threading.Thread):
-    def __init__(self, func, args=()):
-        super(MyThread, self).__init__()
-        self.func = func
-        self.args = args
-    def run(self):
-        time.sleep(2)
-        self.result = self.func(*self.args)
-    def get_result(self):
-        threading.Thread.join(self)  # 等待线程执行完毕
-        try:
-            return self.result
-        except Exception:
-            return None
 
 class StableDiffusionAITPipeline(StableDiffusionPipeline):
     r"""
@@ -94,12 +76,12 @@ class StableDiffusionAITPipeline(StableDiffusionPipeline):
         tokenizer: CLIPTokenizer,
         unet: UNet2DConditionModel,
         scheduler: Union[
-            # DDIMScheduler,
-            # PNDMScheduler,
+            DDIMScheduler,
+            PNDMScheduler,
             LMSDiscreteScheduler,
-            # EulerDiscreteScheduler,
-            # EulerAncestralDiscreteScheduler,
-            # DPMSolverMultistepScheduler,
+            EulerDiscreteScheduler,
+            EulerAncestralDiscreteScheduler,
+            DPMSolverMultistepScheduler,
         ],
         safety_checker: StableDiffusionSafetyChecker,
         feature_extractor: CLIPFeatureExtractor,
@@ -126,7 +108,6 @@ class StableDiffusionAITPipeline(StableDiffusionPipeline):
         self.vae_ait_exe = self.init_ait_module(
             model_name="AutoencoderKL", workdir=workdir
         )
-        self.batch = 1
 
     def init_ait_module(
         self,
@@ -135,7 +116,7 @@ class StableDiffusionAITPipeline(StableDiffusionPipeline):
     ):
         mod = Model(os.path.join(workdir, model_name, "test.so"))
         return mod
-    
+
     def unet_inference(self, latent_model_input, timesteps, encoder_hidden_states):
         exe_module = self.unet_ait_exe
         timesteps_pt = timesteps.expand(latent_model_input.shape[0])
@@ -151,13 +132,12 @@ class StableDiffusionAITPipeline(StableDiffusionPipeline):
         num_outputs = len(exe_module.get_output_name_to_index_map())
         for i in range(num_outputs):
             shape = exe_module.get_output_maximum_shape(i)
-            shape[0] = self.batch * 2
             ys.append(torch.empty(shape).cuda().half())
-        exe_module.run_with_tensors(inputs, ys, graph_mode=True)
+        exe_module.run_with_tensors(inputs, ys, graph_mode=False)
         noise_pred = ys[0].permute((0, 3, 1, 2)).float()
         return noise_pred
 
-    def clip_inference(self, input_ids, seqlen=77):
+    def clip_inference(self, input_ids, seqlen=64):
         exe_module = self.clip_ait_exe
         bs = input_ids.shape[0]
         position_ids = torch.arange(seqlen).expand((bs, -1)).cuda()
@@ -169,9 +149,8 @@ class StableDiffusionAITPipeline(StableDiffusionPipeline):
         num_outputs = len(exe_module.get_output_name_to_index_map())
         for i in range(num_outputs):
             shape = exe_module.get_output_maximum_shape(i)
-            shape[0] = self.batch
             ys.append(torch.empty(shape).cuda().half())
-        exe_module.run_with_tensors(inputs, ys, graph_mode=True)
+        exe_module.run_with_tensors(inputs, ys, graph_mode=False)
         return ys[0].float()
 
     def vae_inference(self, vae_input):
@@ -181,26 +160,11 @@ class StableDiffusionAITPipeline(StableDiffusionPipeline):
         num_outputs = len(exe_module.get_output_name_to_index_map())
         for i in range(num_outputs):
             shape = exe_module.get_output_maximum_shape(i)
-            shape[0] = self.batch
             ys.append(torch.empty(shape).cuda().half())
-        exe_module.run_with_tensors(inputs, ys, graph_mode=True)
+        exe_module.run_with_tensors(inputs, ys, graph_mode=False)
         vae_out = ys[0].permute((0, 3, 1, 2)).float()
         return vae_out
 
-    def loadResources(self):
-        # Pre-compute latent input scales and linear multistep coefficients
-        self.denoising_steps = 50
-        self.scheduler.set_timesteps(self.denoising_steps)
-        self.scheduler.configure()
-    
-    def initialize_latents(self, batch_size, unet_channels, latent_height, latent_width):
-        latents_dtype = torch.float32 # text_embeddings.dtype
-        latents_shape = (batch_size, unet_channels, latent_height, latent_width)
-        latents = torch.randn(latents_shape, device=self.device, dtype=latents_dtype, generator=self.generator)
-        # Scale the initial noise by the standard deviation required by the scheduler
-        latents = latents * self.scheduler.init_noise_sigma
-        return latents
-    
     @torch.no_grad()
     def __call__(
         self,
@@ -232,7 +196,7 @@ class StableDiffusionAITPipeline(StableDiffusionPipeline):
                 expense of slower inference.
             guidance_scale (`float`, *optional*, defaults to 7.5):
                 Guidance scale as defined in [Classifier-Free Diffusion Guidance](https://arxiv.org/abs/2207.12598).
-                `guidance_scale` is defined  as `w` of equation 2. of [Imagen
+                `guidance_scale` is defined as `w` of equation 2. of [Imagen
                 Paper](https://arxiv.org/pdf/2205.11487.pdf). Guidance scale is enabled by setting `guidance_scale >
                 1`. Higher guidance scale encourages to generate images that are closely linked to the text `prompt`,
                 usually at the expense of lower image quality.
@@ -290,13 +254,11 @@ class StableDiffusionAITPipeline(StableDiffusionPipeline):
                 f"`height` and `width` have to be divisible by 8 but are {height} and {width}."
             )
 
-        self.batch = batch_size
-
         # get prompt text embeddings
         text_input = self.tokenizer(
             prompt,
             padding="max_length",
-            max_length=self.tokenizer.model_max_length,
+            max_length=64,  # self.tokenizer.model_max_length,
             truncation=True,
             return_tensors="pt",
         )
@@ -364,14 +326,14 @@ class StableDiffusionAITPipeline(StableDiffusionPipeline):
         latents = latents.to(self.device)
 
         # set timesteps
-        # accepts_offset = "offset" in set(
-        #     inspect.signature(self.scheduler.set_timesteps).parameters.keys()
-        # )
-        # extra_set_kwargs = {}
-        # if accepts_offset:
-        #     extra_set_kwargs["offset"] = 1
+        accepts_offset = "offset" in set(
+            inspect.signature(self.scheduler.set_timesteps).parameters.keys()
+        )
+        extra_set_kwargs = {}
+        if accepts_offset:
+            extra_set_kwargs["offset"] = 1
 
-        # self.scheduler.set_timesteps(num_inference_steps, **extra_set_kwargs)
+        self.scheduler.set_timesteps(num_inference_steps, **extra_set_kwargs)
 
         latents = latents * self.scheduler.init_noise_sigma
 
@@ -397,12 +359,12 @@ class StableDiffusionAITPipeline(StableDiffusionPipeline):
             latent_model_input = (
                 torch.cat([latents] * 2) if do_classifier_free_guidance else latents
             )
-            latent_model_input = self.scheduler.scale_model_input(latent_model_input, i, t)
+            latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
 
-            # if isinstance(self.scheduler, LMSDiscreteScheduler):
-            #     sigma = self.scheduler.sigmas[i]
-            #     # the model input needs to be scaled to match the continuous ODE formulation in K-LMS
-            #     latent_model_input = latent_model_input / ((sigma**2 + 1) ** 0.5)
+            if isinstance(self.scheduler, LMSDiscreteScheduler):
+                sigma = self.scheduler.sigmas[i]
+                # the model input needs to be scaled to match the continuous ODE formulation in K-LMS
+                latent_model_input = latent_model_input / ((sigma**2 + 1) ** 0.5)
 
             # predict the noise residual
             noise_pred = self.unet_inference(
@@ -417,20 +379,14 @@ class StableDiffusionAITPipeline(StableDiffusionPipeline):
                 )
 
             # compute the previous noisy sample x_t -> x_t-1
-            # if isinstance(self.scheduler, LMSDiscreteScheduler):
-            #     latents = self.scheduler.step(
-            #         noise_pred, i, latents, **extra_step_kwargs
-            #     ).prev_sample
-            # else:
-            #     latents = self.scheduler.step(
-            #         noise_pred, t, latents, **extra_step_kwargs
-            #     ).prev_sample
-            # if isinstance(self.scheduler, LMSDiscreteScheduler):
-            #     latents = self.scheduler.step(
-            #         noise_pred, i, latents, **extra_step_kwargs
-            #     )
-            # else:
-                latents = self.scheduler.step(noise_pred, latents, i, t)
+            if isinstance(self.scheduler, LMSDiscreteScheduler):
+                latents = self.scheduler.step(
+                    noise_pred, i, latents, **extra_step_kwargs
+                ).prev_sample
+            else:
+                latents = self.scheduler.step(
+                    noise_pred, t, latents, **extra_step_kwargs
+                ).prev_sample
 
         # scale and decode the image latents with vae
         latents = 1 / 0.18215 * latents

@@ -104,7 +104,11 @@ EXEC_TEMPLATE = jinja2.Template(
 
 HEADER_CODE = jinja2.Template(
     """
-#include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_fwd_multiple_d_xdl_cshuffle.hpp"
+#if 1
+    #include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_fwd_multiple_d_wmma_cshuffle.hpp"
+#else
+    #include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_fwd_multiple_d_xdl_cshuffle.hpp"
+#endif
 """
 )
 
@@ -119,7 +123,6 @@ SRC_TEMPLATE = jinja2.Template(
 #include <random>
 #include <rocrand/rocrand.h>
 #include "logging.h"
-#include "include/ck/utility/print.hpp"
 #include "library/include/ck/library/utility/device_memory.hpp"
 #include "library/include/ck/library/utility/host_tensor.hpp"
 #include "library/include/ck/library/utility/host_tensor_generator.hpp"
@@ -458,7 +461,7 @@ int main(int argc, char** argv) {
   // run
   auto timer = new KernelTimerImpl();
   timer->Start();
-  for(int i = 0; i < 5; ++i) {
+  for(int i = 0; i < 50; ++i) {
     {{func_call}}
   }
   timer->End();

@@ -21,14 +21,17 @@
 
 #include "ATen/Context.h" // @manual
 #ifdef __HIP_PLATFORM_HCC__
+#include "rocm_device_functions.h"
 #include "ATen/hip/HIPContext.h"
 #include "c10/core/CPUAllocator.h"
 #include "c10/hip/HIPStream.h"
 #else
+#include "cuda_device_functions.h"
 #include "ATen/cuda/CUDAContext.h"
 #include "c10/core/CPUAllocator.h"
 #include "c10/cuda/CUDAStream.h"
 #endif
+
 
 #ifdef FBCODE_AIT
 #include "folly/MapUtil.h"

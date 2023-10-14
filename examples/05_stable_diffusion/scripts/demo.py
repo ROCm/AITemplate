@@ -18,11 +18,12 @@ import torch
 
 from aitemplate.testing.benchmark_pt import benchmark_torch_function
 from aitemplate.utils.import_path import import_parent
-from diffusers import EulerDiscreteScheduler
+# from diffusers import EulerDiscreteScheduler
+
 
 if __name__ == "__main__":
     import_parent(filepath=__file__, level=1)
-
+from src.utils import *
 from src.pipeline_stable_diffusion_ait import StableDiffusionAITPipeline
 
 
@@ -38,12 +39,12 @@ from src.pipeline_stable_diffusion_ait import StableDiffusionAITPipeline
 @click.option("--prompt", default="A vision of paradise, Unreal Engine", help="prompt")
 @click.option("--negative_prompt", default="", help="prompt")
 @click.option(
-    "--benchmark", type=bool, default=False, help="run stable diffusion e2e benchmark"
+    "--benchmark", type=bool, default=True, help="run stable diffusion e2e benchmark"
 )
 def run(local_dir, width, height, batch, prompt, negative_prompt, benchmark):
     pipe = StableDiffusionAITPipeline.from_pretrained(
         local_dir,
-        scheduler=EulerDiscreteScheduler.from_pretrained(
+        scheduler=LMSDiscreteScheduler.from_pretrained(
             local_dir, subfolder="scheduler"
         ),
         revision="fp16",
@@ -51,8 +52,10 @@ def run(local_dir, width, height, batch, prompt, negative_prompt, benchmark):
     ).to("cuda")
 
     prompt = [prompt] * batch
+    pipe.loadResources()
     with torch.autocast("cuda"):
         images = pipe(prompt, height, width).images
+        
         if benchmark:
             t = benchmark_torch_function(10, pipe, prompt, height=height, width=width)
             print(

@@ -180,7 +180,7 @@ int main(int argc, char** argv) {
   // run
   KernelTimerImpl timer;
   timer.Start();
-  for(int i = 0; i < 5; ++i) {
+  for(int i = 0; i < 50; ++i) {
     {{func_call}}
   }
   timer.End();
@@ -201,7 +201,6 @@ FUNC_TEMPLATE = jinja2.Template(
 #include <random>
 #include <rocrand/rocrand.h>
 #include "logging.h"
-#include "include/ck/utility/print.hpp"
 #include "library/include/ck/library/utility/device_memory.hpp"
 #include "library/include/ck/library/utility/host_tensor.hpp"
 #include "library/include/ck/library/utility/host_tensor_generator.hpp"

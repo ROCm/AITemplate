@@ -52,6 +52,7 @@ def get_down_block(
     cross_attention_dim=None,
     downsample_padding=None,
     use_linear_projection=False,
+    is_remove_resnet_pre_silu=False,
 ):
     down_block_type = (
         down_block_type[7:]
@@ -68,6 +69,7 @@ def get_down_block(
             resnet_eps=resnet_eps,
             resnet_act_fn=resnet_act_fn,
             downsample_padding=downsample_padding,
+             is_remove_resnet_pre_silu=is_remove_resnet_pre_silu,
         )
     elif down_block_type == "AttnDownBlock2D":
         return AttnDownBlock2D(
@@ -80,6 +82,7 @@ def get_down_block(
             resnet_act_fn=resnet_act_fn,
             downsample_padding=downsample_padding,
             attn_num_head_channels=attn_num_head_channels,
+            is_remove_resnet_pre_silu=is_remove_resnet_pre_silu,
         )
     elif down_block_type == "CrossAttnDownBlock2D":
         if cross_attention_dim is None:
@@ -98,6 +101,7 @@ def get_down_block(
             cross_attention_dim=cross_attention_dim,
             attn_num_head_channels=attn_num_head_channels,
             use_linear_projection=use_linear_projection,
+            is_remove_resnet_pre_silu=is_remove_resnet_pre_silu,
         )
     elif down_block_type == "SkipDownBlock2D":
         return SkipDownBlock2D(
@@ -147,6 +151,7 @@ def get_up_block(
     attn_num_head_channels,
     cross_attention_dim=None,
     use_linear_projection=False,
+    is_remove_resnet_pre_silu=False,
 ):
     up_block_type = (
         up_block_type[7:] if up_block_type.startswith("UNetRes") else up_block_type
@@ -161,6 +166,7 @@ def get_up_block(
             add_upsample=add_upsample,
             resnet_eps=resnet_eps,
             resnet_act_fn=resnet_act_fn,
+            is_remove_resnet_pre_silu=is_remove_resnet_pre_silu,
         )
     elif up_block_type == "CrossAttnUpBlock2D":
         if cross_attention_dim is None:
@@ -179,6 +185,7 @@ def get_up_block(
             cross_attention_dim=cross_attention_dim,
             attn_num_head_channels=attn_num_head_channels,
             use_linear_projection=use_linear_projection,
+            is_remove_resnet_pre_silu=is_remove_resnet_pre_silu,
         )
     elif up_block_type == "AttnUpBlock2D":
         return AttnUpBlock2D(
@@ -223,6 +230,7 @@ def get_up_block(
             add_upsample=add_upsample,
             resnet_eps=resnet_eps,
             resnet_act_fn=resnet_act_fn,
+            is_remove_resnet_pre_silu=is_remove_resnet_pre_silu,
         )
     raise ValueError(f"{up_block_type} does not exist.")
 
@@ -244,6 +252,7 @@ class UNetMidBlock2DCrossAttn(nn.Module):
         output_scale_factor=1.0,
         cross_attention_dim=1280,
         use_linear_projection=False,
+        is_remove_resnet_pre_silu=False,
         **kwargs,
     ):
         super().__init__()
@@ -267,6 +276,7 @@ class UNetMidBlock2DCrossAttn(nn.Module):
                 non_linearity=resnet_act_fn,
                 output_scale_factor=output_scale_factor,
                 pre_norm=resnet_pre_norm,
+                is_remove_resnet_pre_silu=is_remove_resnet_pre_silu,
             )
         ]
         attentions = []
@@ -294,6 +304,7 @@ class UNetMidBlock2DCrossAttn(nn.Module):
                     non_linearity=resnet_act_fn,
                     output_scale_factor=output_scale_factor,
                     pre_norm=resnet_pre_norm,
+                    is_remove_resnet_pre_silu=is_remove_resnet_pre_silu,
                 )
             )
 
@@ -329,6 +340,7 @@ class CrossAttnDownBlock2D(nn.Module):
         downsample_padding=1,
         add_downsample=True,
         use_linear_projection=False,
+        is_remove_resnet_pre_silu=False,
     ):
         super().__init__()
 
@@ -352,6 +364,7 @@ class CrossAttnDownBlock2D(nn.Module):
                     non_linearity=resnet_act_fn,
                     output_scale_factor=output_scale_factor,
                     pre_norm=resnet_pre_norm,
+                    is_remove_resnet_pre_silu=is_remove_resnet_pre_silu,
                 )
             )
             attentions.append(
@@ -415,6 +428,7 @@ class DownBlock2D(nn.Module):
         output_scale_factor=1.0,
         add_downsample=True,
         downsample_padding=1,
+        is_remove_resnet_pre_silu=False,
     ):
         super().__init__()
         resnets = []
@@ -433,6 +447,7 @@ class DownBlock2D(nn.Module):
                     non_linearity=resnet_act_fn,
                     output_scale_factor=output_scale_factor,
                     pre_norm=resnet_pre_norm,
+                    is_remove_resnet_pre_silu=is_remove_resnet_pre_silu,
                 )
             )
 
@@ -490,6 +505,7 @@ class CrossAttnUpBlock2D(nn.Module):
         downsample_padding=1,
         add_upsample=True,
         use_linear_projection=False,
+        is_remove_resnet_pre_silu=False,
     ):
         super().__init__()
 
@@ -515,6 +531,7 @@ class CrossAttnUpBlock2D(nn.Module):
                     non_linearity=resnet_act_fn,
                     output_scale_factor=output_scale_factor,
                     pre_norm=resnet_pre_norm,
+                    is_remove_resnet_pre_silu=is_remove_resnet_pre_silu,
                 )
             )
             attentions.append(
@@ -578,6 +595,7 @@ class UpBlock2D(nn.Module):
         resnet_pre_norm: bool = True,
         output_scale_factor=1.0,
         add_upsample=True,
+        is_remove_resnet_pre_silu=False,
     ):
         super().__init__()
         resnets = []
@@ -598,6 +616,7 @@ class UpBlock2D(nn.Module):
                     non_linearity=resnet_act_fn,
                     output_scale_factor=output_scale_factor,
                     pre_norm=resnet_pre_norm,
+                    is_remove_resnet_pre_silu=is_remove_resnet_pre_silu,
                 )
             )
 
@@ -642,6 +661,7 @@ class UpDecoderBlock2D(nn.Module):
         resnet_pre_norm: bool = True,
         output_scale_factor=1.0,
         add_upsample=True,
+        is_remove_resnet_pre_silu=False,
     ):
         super().__init__()
         resnets = []
@@ -661,6 +681,7 @@ class UpDecoderBlock2D(nn.Module):
                     non_linearity=resnet_act_fn,
                     output_scale_factor=output_scale_factor,
                     pre_norm=resnet_pre_norm,
+                    is_remove_resnet_pre_silu=is_remove_resnet_pre_silu,
                 )
             )
 
@@ -702,6 +723,7 @@ class UNetMidBlock2D(nn.Module):
         attn_num_head_channels=1,
         attention_type="default",
         output_scale_factor=1.0,
+        is_remove_resnet_pre_silu=False,
         **kwargs,
     ):
         super().__init__()
@@ -728,6 +750,7 @@ class UNetMidBlock2D(nn.Module):
                 non_linearity=resnet_act_fn,
                 output_scale_factor=output_scale_factor,
                 pre_norm=resnet_pre_norm,
+                is_remove_resnet_pre_silu=is_remove_resnet_pre_silu,
             )
         ]
         attentions = []
@@ -756,6 +779,7 @@ class UNetMidBlock2D(nn.Module):
                     non_linearity=resnet_act_fn,
                     output_scale_factor=output_scale_factor,
                     pre_norm=resnet_pre_norm,
+                    is_remove_resnet_pre_silu=is_remove_resnet_pre_silu,
                 )
             )
 

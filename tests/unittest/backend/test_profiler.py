@@ -63,7 +63,6 @@ class ProfilerTestCase(unittest.TestCase):
                     cmds=["sleep", f"{sleep_for}"],
                     process_result_callback=delegate_cb_wrapper(i, sleep_for),
                 )
-
             pr.join()
 
 
