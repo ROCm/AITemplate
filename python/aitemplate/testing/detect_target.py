@@ -89,6 +89,10 @@ def _detect_rocm():
         stdout = stdout.decode("utf-8")
         if "gfx1100" in stdout:
             return "gfx1100"
+        if "gfx1101" in stdout:
+            return "gfx1101"
+        if "gfx1102" in stdout:
+            return "gfx1102"
         if "gfx90a" in stdout:
             return "gfx90a"
         if "gfx908" in stdout:

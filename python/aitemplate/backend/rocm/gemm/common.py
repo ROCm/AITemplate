@@ -88,19 +88,19 @@ EXEC_TEMPLATE = jinja2.Template(
 EXTRA_HEADER_TEMPLATE = jinja2.Template(
     """
 {% if gemm_flag == "" %}
-    {% if rocm_device_name == "gfx1100" %}
+    {% if rocm_device_name in ["gfx1100", "gfx1101", "gfx1102"] %}
 #include "ck/tensor_operation/gpu/device/impl/device_gemm_wmma.hpp"
     {% else %}
 #include "ck/tensor_operation/gpu/device/impl/device_gemm_xdl_cshuffle.hpp"
     {% endif %}
 {% elif gemm_flag == "permute_m2n3" %}
-    {% if rocm_device_name == "gfx1100" %}
+    {% if rocm_device_name in ["gfx1100", "gfx1101", "gfx1102"] %}
 #include "ck/tensor_operation/gpu/device/impl/device_batched_contraction_multiple_d_wmma_cshuffle.hpp"
     {% else %}
 #include "ck/tensor_operation/gpu/device/impl/device_batched_contraction_multiple_d_xdl_cshuffle.hpp"
     {% endif %}
 {% elif "bias" in gemm_flag or has_d0 %}
-    {% if rocm_device_name == "gfx1100" %}
+    {% if rocm_device_name in ["gfx1100", "gfx1101", "gfx1102"] %}
 #include "ck/tensor_operation/gpu/device/impl/device_gemm_multiple_d_wmma_cshuffle.hpp"
     {% else %}
 #include "ck/tensor_operation/gpu/device/impl/device_gemm_multiple_d_xdl_cshuffle.hpp"
@@ -111,7 +111,7 @@ EXTRA_HEADER_TEMPLATE = jinja2.Template(
 #include "ck/tensor_operation/gpu/device/impl/gemm_specialization.hpp"
         {% endif %}
     {% elif gemm_flag in ["bias_permute_m2n3", "bias_permute_m3n2"]  %}
-        {% if rocm_device_name == "gfx1100" %}
+        {% if rocm_device_name in ["gfx1100", "gfx1101", "gfx1102"] %}
 #include "ck/tensor_operation/gpu/device/impl/device_batched_contraction_multiple_d_wmma_cshuffle.hpp"
         {% else %}
 #include "ck/tensor_operation/gpu/device/impl/device_batched_contraction_multiple_d_xdl_cshuffle.hpp"
