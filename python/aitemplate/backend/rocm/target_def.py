@@ -134,6 +134,12 @@ class ROCM(Target):
         elif self._arch in {"GFX1100", "gfx1100"}:
             options.append("-DCK_AMD_GPU_GFX1100")
             options.append("--offload-arch=gfx1100")
+        elif self._arch in {"GFX1101", "gfx1101"}:
+            options.append("-DCK_AMD_GPU_GFX1101")
+            options.append("--offload-arch=gfx1101")
+        elif self._arch in {"GFX1102", "gfx1102"}:
+            options.append("-DCK_AMD_GPU_GFX1102")
+            options.append("--offload-arch=gfx1102")
         else:
             raise RuntimeError("Unsupported GPU Arch")
         for path in ck_paths:
@@ -317,6 +323,12 @@ class FBROCM(ROCM):
         elif self._arch in {"GFX1100", "gfx1100"}:
             options.append("-DCK_AMD_GPU_GFX1100")
             options.append("--amdgpu-target=gfx1100")
+        elif self._arch in {"GFX1101", "gfx1101"}:
+            options.append("-DCK_AMD_GPU_GFX1101")
+            options.append("--offload-arch=gfx1101")
+        elif self._arch in {"GFX1102", "gfx1102"}:
+            options.append("-DCK_AMD_GPU_GFX1102")
+            options.append("--offload-arch=gfx1102")
         else:
             raise RuntimeError("Unsupported GPU Arch")
         for path in ck_paths:

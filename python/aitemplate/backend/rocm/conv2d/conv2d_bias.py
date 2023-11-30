@@ -40,7 +40,7 @@ def conv2d_config(func_attrs):
     """
     import ck_lib
 
-    if Target.current().get_device_name() == "gfx1100":
+    if Target.current().get_device_name() in ["gfx1100", "gfx1101", "gfx1102"]:
         op_kind = ck_lib.library.Conv2dKind.GroupConv2dBiasReluWmma
     else:
         op_kind = ck_lib.library.Conv2dKind.GroupConv2dBiasReluXlops
