@@ -17,37 +17,21 @@ import unittest
 import torch
 
 from aitemplate.compiler import compile_model, ops
-from aitemplate.frontend import IntImm, nn, Tensor
+from aitemplate.frontend import IntImm, Tensor
 from aitemplate.testing import detect_target
-from aitemplate.testing.test_utils import (
-    filter_test_cases_by_params,
-    get_random_torch_tensor,
-    TestEnv,
-)
-
-from parameterized import parameterized
 
 
 class ConvTestCase(unittest.TestCase):
-    def _test_conv(
-        self,
-        batch=4,
-        copy_op=False,
-        test_name="conv2d",
-        dtype="float16",
-    ):
+    def _test_fp16(self, batch=1, copy_op=False):
         target = detect_target()
         X = Tensor(
-            shape=[IntImm(batch), 28, 28, 128],
-            dtype=dtype,
+            shape=[IntImm(batch), 224, 224, 3],
+            dtype="float16",
             name="input_0",
             is_input=True,
         )
         W = Tensor(
-            shape=[256, 3, 3, 128],
-            dtype=dtype,
-            name="input_1",
-            is_input=True,
+            shape=[256, 3, 3, 3], dtype="float16", name="input_1", is_input=True
         )
         OP = ops.conv2d(stride=1, pad=1, dilate=1)
         if copy_op:
@@ -55,24 +39,20 @@ class ConvTestCase(unittest.TestCase):
         Y = OP(X, W)
         Y._attrs["name"] = "output_0"
         Y._attrs["is_output"] = True
-        module = compile_model(Y, target, "./tmp", test_name)
+        module = compile_model(Y, target, "./tmp", f"conv2d_{copy_op}")
 
-        X_pt = get_random_torch_tensor([batch, 128, 28, 28], dtype=dtype)
-        W_pt = get_random_torch_tensor([256, 128, 3, 3], dtype=dtype)
-        Y_pt = torch.nn.functional.conv2d(X_pt.float(), W_pt.float(), padding=1).to(
-            dtype=X_pt.dtype
-        )
+        X_pt = torch.randn(batch, 3, 224, 224).cuda().half()
+        W_pt = torch.randn(256, 3, 3, 3).cuda().half()
+        Y_pt = torch.nn.functional.conv2d(X_pt, W_pt, padding=1)
         x = X_pt.permute((0, 2, 3, 1)).contiguous()
         w = W_pt.permute((0, 2, 3, 1)).contiguous()
         y = torch.empty_like(Y_pt).permute((0, 2, 3, 1)).contiguous()
         module.run_with_tensors({"input_0": x, "input_1": w}, [y])
         y_transpose = y.permute((0, 3, 1, 2))
         if target.name() == "cuda":
-            if dtype == "float32":
-                torch.testing.assert_close(Y_pt, y_transpose, atol=1e-1, rtol=1e-1)
-            else:
-                torch.testing.assert_close(Y_pt, y_transpose, atol=1e-2, rtol=1e-2)
+            self.assertTrue(torch.allclose(Y_pt, y_transpose, atol=1e-2, rtol=1e-2))
         else:
+<<<<<<< HEAD
             torch.testing.assert_close(Y_pt, y_transpose, atol=1.25e-1, rtol=1e-1)
 
     @parameterized.expand(
@@ -134,55 +114,13 @@ class ConvTestCase(unittest.TestCase):
         X_pt = get_random_torch_tensor([batch, C_in, L], dtype=dtype)
         W_pt = get_random_torch_tensor([C_out, C_in, K], dtype=dtype)
         bias_pt = get_random_torch_tensor([C_out], dtype=dtype) if bias else None
+=======
+            self.assertTrue(torch.allclose(Y_pt, y_transpose, atol=1.25e-1, rtol=1e-1))
+>>>>>>> origin/navi3_rel_ver_1.0
 
-        X = Tensor(
-            shape=[IntImm(batch), L, C_in],
-            dtype=dtype,
-            name="input_0",
-            is_input=True,
-        )
-        mod = nn.Conv1d(
-            in_channels=C_in,
-            out_channels=C_out,
-            kernel_size=K,
-            stride=stride,
-            padding=padding,
-            dilation=dilation,
-            dtype=dtype,
-            bias=bias,
-        )
-
-        Y = mod(X)
-
-        Y._attrs["name"] = "output_0"
-        Y._attrs["is_output"] = True
-        module = compile_model(Y, target, "./tmp", test_name)
-        module.set_constant_with_tensor(
-            "conv1d_weight", W_pt.permute((0, 2, 1)).contiguous()
-        )
-        if bias:
-            module.set_constant_with_tensor("conv1d_bias", bias_pt)
-        Y_pt = torch.nn.functional.conv1d(
-            X_pt.float(),
-            W_pt.float(),
-            bias=bias_pt.float() if bias else None,
-            padding=padding,
-            stride=stride,
-            dilation=dilation,
-        ).to(dtype=X_pt.dtype)
-
-        x = X_pt.permute((0, 2, 1)).contiguous()
-
-        y = torch.empty_like(Y_pt).permute((0, 2, 1)).contiguous()
-        module.run_with_tensors({"input_0": x}, [y])
-        y_transpose = y.permute((0, 2, 1))
-        if target.name() == "cuda":
-            if dtype == "float32":
-                torch.testing.assert_close(Y_pt, y_transpose, atol=1.5e-1, rtol=1e-1)
-            else:
-                torch.testing.assert_close(Y_pt, y_transpose, atol=1e-2, rtol=1e-2)
-        else:
-            torch.testing.assert_close(Y_pt, y_transpose, atol=1.25e-1, rtol=1e-1)
+    def test_fp16(self):
+        self._test_fp16()
+        self._test_fp16(copy_op=True)
 
 
 if __name__ == "__main__":

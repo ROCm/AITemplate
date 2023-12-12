@@ -1033,10 +1033,11 @@ class ModelContainerGenerator:
         The dictionary returned is a map from filename -> contents.
         """
         device_functions_header_name = f"{self.target.name()}_device_functions.h"
+        includes_header_name = f"{self.target.name()}_includes.h"
         result = {}
         result[
             "device_functions-generated.h"
-        ] = f'#include "{device_functions_header_name}"'
+        ] = f'#include "{device_functions_header_name}"\n#include "{includes_header_name}"'
 
         result["model-generated.h"] = self.generate_model()
 

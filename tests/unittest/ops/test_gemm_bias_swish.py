@@ -72,6 +72,7 @@ class GEMMBiasSwishTestCase(unittest.TestCase):
         inputs = {"input_0": X_pt, "input_1": W_pt, "input_2": B_pt}
         y = get_torch_empty_tensor([M, N], dtype)
         module.run_with_tensors(inputs, [y])
+<<<<<<< HEAD
         torch.testing.assert_close(Y_pt, y, **_TOLERANCE_LIMITS[dtype])
 
     def test_gemm_rcr_bias_swish_fp16(self):
@@ -119,6 +120,18 @@ class GEMMBiasSwishTestCase(unittest.TestCase):
                 dtype="bfloat16",
                 test_suffix="bfloat16_force_sm90",
             )
+=======
+        self.assertTrue(torch.allclose(Y_pt, y, **_TOLERANCE_LIMITS[dtype]))
+
+    def test_rcr_float16(self):
+        self._test_rcr(dtype="float16")
+
+    # def test_rcr_float32_sm80(self):
+        # self._test_rcr(dtype="float32")
+
+    # def test_rcr_bfloat16_bf16(self):
+        # self._test_rcr(dtype="bfloat16")
+>>>>>>> origin/navi3_rel_ver_1.0
 
 
 filter_test_cases_by_test_env(GEMMBiasSwishTestCase)

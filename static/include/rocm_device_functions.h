@@ -20,11 +20,7 @@
 #include <stdlib.h>
 #include <cstdlib>
 #include <initializer_list>
-#include "include/ck/tensor_operation/gpu/device/tensor_layout.hpp"
-#include "include/ck/utility/print.hpp"
-#include "library/include/ck/library/utility/device_memory.hpp"
-#include "library/include/ck/library/utility/host_tensor.hpp"
-#include "library/include/ck/library/utility/host_tensor_generator.hpp"
+#include <hip/hip_runtime.h>
 
 namespace ait {
 

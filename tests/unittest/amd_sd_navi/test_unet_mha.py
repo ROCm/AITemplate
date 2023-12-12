@@ -174,36 +174,15 @@ class BMMSoftmaxBMMTestCase(unittest.TestCase):
 
     def test_rcr_rocm(self):
         # FIXME: re-enable it after we fix the missing parameter for bmm_softmax_bmm
-        # self._test_b2b([16], [576], N=576, K=64, D=64, test_name="static")
-        self._test_bmm_permute([24], [256], N=256, K=64, D=64, test_name="static")
-        self._test_bmm_permute([24], [196], N=196, K=64, D=64, test_name="static")
-        self._test_bmm_permute([24], [128], N=1024, K=64, D=128, test_name="static")
-        self._test_bmm_permute([24], [128], N=49, K=64, D=128, test_name="static")
-        self._test_bmm_permute([24], [49], N=49, K=64, D=64, test_name="static")
-        self._test_bmm_permute([24], [1020], N=1020, K=64, D=128, test_name="static")
-        self._test_bmm_permute(
-            [24], [1020], N=1020, K=64, D=128, test_name="static_copy_op", copy_op=True
-        )
-        self._test_bmm_permute(
-            [32], [49], N=49, K=64, D=64, num_heads=4, test_name="static"
-        )
-        self._test_bmm_permute(
-            [16], [4096], N=64, K=40, D=40, num_heads=8, test_name="static"
-        )
-        # self._test_bmm_permute(
-        #     [12], [64], N=64, K=64, D=64, num_heads=12, causal=True, test_name="static"
-        # )
-        # self._test_bmm_permute(
-        #     [12],
-        #     [64],
-        #     N=64,
-        #     K=64,
-        #     D=64,
-        #     num_heads=12,
-        #     causal=True,
-        #     test_name="static_copy_op",
-        #     copy_op=True,
-        # )
+        self._test_bmm_permute([10], [4096], N=4096, K=64, D=64, head_dim=64, num_heads=5,test_name="static")
+        self._test_bmm_permute([10], [4096], N=64, K=64, D=64, head_dim=64, num_heads=5,test_name="static")
+        self._test_bmm_permute([20], [1024], N=1024, K=64, D=64, head_dim=64, num_heads=5,test_name="static")
+        self._test_bmm_permute([20], [1024], N=64, K=64, D=64, head_dim=64, num_heads=5,test_name="static")
+        self._test_bmm_permute([40], [256], N=256, K=64, D=64, head_dim=64, num_heads=5,test_name="static")
+        self._test_bmm_permute([40], [256], N=64, K=64, D=64, head_dim=64, num_heads=5,test_name="static")
+        self._test_bmm_permute([40], [64], N=64, K=64, D=64, head_dim=64, num_heads=5,test_name="static")
+        
+        
 
 
 filter_test_cases_by_test_env(BMMSoftmaxBMMTestCase)

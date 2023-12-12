@@ -76,7 +76,11 @@ EXTRA_SHAPE_TEMPLATE = jinja2.Template(
 EXTRA_HEADER_TEMPLATE = jinja2.Template(
     """
 #include "ck/tensor_operation/gpu/device/tensor_specialization.hpp"
+#if 1
+#include "ck/tensor_operation/gpu/device/impl/device_batched_gemm_softmax_gemm_permute_wmma_cshuffle.hpp"
+#else
 #include "ck/tensor_operation/gpu/device/impl/device_batched_gemm_softmax_gemm_permute_xdl_cshuffle.hpp"
+#endif
 """
 )
 

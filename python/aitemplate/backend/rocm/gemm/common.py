@@ -89,16 +89,34 @@ EXEC_TEMPLATE = jinja2.Template(
 EXTRA_HEADER_TEMPLATE = jinja2.Template(
     """
 {% if gemm_flag == "" %}
+    {% if rocm_device_name == "gfx1100" %}
+#include "ck/tensor_operation/gpu/device/impl/device_gemm_wmma.hpp"
+    {% else %}
 #include "ck/tensor_operation/gpu/device/impl/device_gemm_xdl_cshuffle.hpp"
+    {% endif %}
 {% elif gemm_flag == "permute_m2n3" %}
+    {% if rocm_device_name == "gfx1100" %}
+#include "ck/tensor_operation/gpu/device/impl/device_batched_contraction_multiple_d_wmma_cshuffle.hpp"
+    {% else %}
 #include "ck/tensor_operation/gpu/device/impl/device_batched_contraction_multiple_d_xdl_cshuffle.hpp"
+    {% endif %}
 {% elif "bias" in gemm_flag or has_d0 %}
+    {% if rocm_device_name == "gfx1100" %}
+#include "ck/tensor_operation/gpu/device/impl/device_gemm_multiple_d_wmma_cshuffle.hpp"
+    {% else %}
 #include "ck/tensor_operation/gpu/device/impl/device_gemm_multiple_d_xdl_cshuffle.hpp"
+    {% endif %}
     {% if gemm_flag == "bias_permute" %}
+        {% if rocm_device_name != "gfx1100" %}
 #include "ck/tensor_operation/gpu/device/impl/device_gemm_bias_e_permute_xdl.hpp"
 #include "ck/tensor_operation/gpu/device/impl/gemm_specialization.hpp"
+        {% endif %}
     {% elif gemm_flag in ["bias_permute_m2n3", "bias_permute_m3n2"]  %}
+        {% if rocm_device_name == "gfx1100" %}
+#include "ck/tensor_operation/gpu/device/impl/device_batched_contraction_multiple_d_wmma_cshuffle.hpp"
+        {% else %}
 #include "ck/tensor_operation/gpu/device/impl/device_batched_contraction_multiple_d_xdl_cshuffle.hpp"
+        {% endif %}
     {% endif %}
 {% endif %}
 """
@@ -652,6 +670,7 @@ def gen_profiler(
     file_pairs = []
     has_d0_flag = has_d0(func_attrs)
     has_d1_flag = has_d1(func_attrs)
+    rocm_device_name = Target.current().get_device_name()
 
     for op_name, op in op_instance.items():
         config = emit_instance(op)
@@ -672,7 +691,7 @@ def gen_profiler(
             is_profiler=True,
         )
         extra_header = extra_header_template.render(
-            gemm_flag=gemm_flag, has_d0=has_d0_flag
+            rocm_device_name=rocm_device_name, gemm_flag=gemm_flag, has_d0=has_d0_flag
         )
         op_func = SRC_TEMPLATE.render(
             instances=instance,
@@ -786,6 +805,8 @@ def gen_function(
     instance_decl = ""
     has_d0_flag = has_d0(func_attrs)
     has_d1_flag = has_d1(func_attrs)
+    rocm_device_name = Target.current().get_device_name()
+
     for key, value in exec_path.items():
         fname = "f" + sha1(key.encode()).hexdigest()
         algo = value.algo
@@ -829,7 +850,7 @@ def gen_function(
         exec_inst = exec_cond_template.render(indent="  ", cond=key, program=program)
         exec_paths += exec_inst
     extra_header = extra_header_template.render(
-        gemm_flag=gemm_flag, has_d0=has_d0(func_attrs)
+        rocm_device_name=rocm_device_name, gemm_flag=gemm_flag, has_d0=has_d0(func_attrs)
     )
     pdims = len(func_attrs["shape"]) if func_attrs.get("shape") is not None else 0
     return SRC_TEMPLATE.render(

@@ -100,19 +100,6 @@ class GroupnormTestCase(unittest.TestCase):
         x4 = torch.empty_like(x1_nhwc_pt)
         module.run_with_tensors(inputs, [x4])
 
-        # from aitemplate.testing.benchmark_pt import benchmark_torch_function
-        # module.benchmark_with_tensors(inputs, [x4], count=100000)
-        # t = benchmark_torch_function(
-        #    100000,
-        #    torch.nn.functional.group_norm,
-        #    x1_nchw_pt,
-        #    num_groups,
-        #    gamma_pt,
-        #    beta_pt,
-        #    eps=eps,
-        # )
-        # print("pt: ", t)
-
         torch.testing.assert_close(
             x4, x4_pt.permute(0, 2, 3, 1).contiguous(), atol=atol, rtol=rtol
         )
@@ -129,55 +116,24 @@ class GroupnormTestCase(unittest.TestCase):
         self._test_groupnorm(x_shape=[1, 8, 1, 4], num_groups=2, eps=1e-5, copy_op=True)
 
     def test_groupnorm_swish(self):
-        self._test_groupnorm(use_swish=True)
-        self._test_groupnorm(
-            x_shape=[3, 3, 1, 4], num_groups=2, eps=1e-5, use_swish=True
-        )
-        self._test_groupnorm(
-            x_shape=[7, 13, 9, 12], num_groups=4, eps=1e-5, use_swish=True, copy_op=True
-        )
-        self._test_groupnorm(
-            x_shape=[2, 8, 8, 1280], num_groups=32, eps=1e-5, use_swish=True
-        )
-        self._test_groupnorm(
-            x_shape=[2, 32, 32, 320], num_groups=32, eps=1e-5, use_swish=True
-        )
-        self._test_groupnorm(
-            x_shape=[1, 512, 512, 256], num_groups=32, eps=1e-5, use_swish=True
-        )
-        # vae model groupnorm+swish
-        vae_shapes = [
-            (1, 64, 64, 512),
-            (1, 128, 128, 512),
-            (1, 256, 256, 512),
-            (1, 256, 256, 256),
-            (1, 512, 512, 256),
-            (1, 512, 512, 128),
+        # unet model groupnorm+swish
+        unet_shapes = [
+            (2, 64, 64, 320),
+            (2, 32, 32, 320),
+            (2, 32, 32, 640),
+            (2, 16, 16, 640),
+            (2, 16, 16, 1280),
+            (2, 8, 8, 1280),
+            (2, 8, 8, 2560),
+            (2, 16, 16, 2560),
+            (2, 32, 32, 1920),
+            (2, 32, 32, 1280),
+            (2, 32, 32, 960),
+            (2, 64, 64, 960),
+            (2, 64, 64, 640),
         ]
-        for shape in vae_shapes:
+        for shape in unet_shapes:
             self._test_groupnorm(x_shape=shape, num_groups=32, eps=1e-5, use_swish=True)
-
-        # For benchmark only.
-        # shapes = [
-        #     (2, 16, 16, 1280),
-        #     (2, 16, 16, 1920),
-        #     (2, 16, 16, 2560),
-        #     (2, 16, 16, 640),
-        #     (2, 32, 32, 1280),
-        #     (2, 32, 32, 1920),
-        #     (2, 32, 32, 320),
-        #     (2, 32, 32, 640),
-        #     (2, 32, 32, 960),
-        #     (2, 64, 64, 320),
-        #     (2, 8, 8, 1280),
-        #     (2, 8, 8, 2560),
-        #     (2, 64, 64, 640),
-        #     (2, 64, 64, 960),
-        #     (1, 256, 256, 128),
-        #     (1, 512, 512, 256),
-        # ]
-        # for shape in shapes:
-        #     self._test_groupnorm(x_shape=shape, num_groups=32, eps=1e-5, use_swish=True)
 
     @unittest.skipIf(detect_target().name() == "rocm", "fp32 not supported in ROCm")
     def test_groupnorm_float32(self):

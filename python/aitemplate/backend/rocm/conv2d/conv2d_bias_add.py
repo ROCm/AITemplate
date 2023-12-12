@@ -17,6 +17,7 @@ conv2d bias add codegen
 """
 from ... import registry
 from . import common
+from aitemplate.backend.target import Target
 
 # pylint: disable=C0103,C0415,W0613,C0301
 
@@ -25,7 +26,10 @@ from . import common
 def conv2d_config(func_attrs):
     import ck_lib
 
-    op_kind = ck_lib.library.Conv2dKind.GroupConv2dBiasRelu
+    if Target.current().get_device_name() == "gfx1100":
+        op_kind = ck_lib.library.Conv2dKind.GroupConv2dBiasReluWmma
+    else:
+        op_kind = ck_lib.library.Conv2dKind.GroupConv2dBiasReluXlops
     extra_kind = ck_lib.library.TensorOperation.AddAdd
     func_attrs["op_instance"] = common.extract_config(op_kind, extra_kind)
 
