@@ -21,11 +21,11 @@ from typing import Any, Dict
 
 import jinja2
 
-from ... import registry
-from ...backend_spec import CUDASpec
-from ...common import tensor_accessor_codegen
-from ...target import Target
-from . import layernorm_common
+from aitemplate.backend import registry
+from aitemplate.backend.backend_spec import CUDASpec
+from aitemplate.backend.common import tensor_accessor_codegen
+from aitemplate.backend.cuda.layernorm_sigmoid_mul import layernorm_common
+from aitemplate.backend.target import Target
 
 # pylint: disable=C0301
 
@@ -45,9 +45,12 @@ LOCAL_PARAM_DEF_TEMPLATE = jinja2.Template(
 FUNC_TEMPLATE = jinja2.Template(
     """
 #include <cuda_fp16.h>
+#include <cuda_bf16.h>
 #include "cutlass/cutlass.h"
 #include "cutlass/fast_math.h"
 #include "logging.h"
+
+using bfloat16 = __nv_bfloat16;
 
 namespace {
 
@@ -266,7 +269,11 @@ def group_layernorm_sigmoid_mul_gen_function_call(func_attrs, indent="  "):
 
     all_shape_funcs = []
     # all Ms are the same
-    input_0_shapes = inputs[0]._attrs["shape"]
+    if func_attrs.get("input_accessors", None):
+        input_accessor = func_attrs["input_accessors"][0]
+        input_0_shapes = input_accessor.original_shapes
+    else:
+        input_0_shapes = inputs[0]._attrs["shape"]
     norm_ndim = len(func_attrs["normalized_shape"][0])
     m_name = "M"
     m_shape_func = layernorm_common.generate_m_shape_func(

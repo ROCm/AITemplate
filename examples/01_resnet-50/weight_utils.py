@@ -30,15 +30,15 @@ from aitemplate.testing import detect_target
 CONV_WEIGHT_PATTERN = re.compile(r"conv\d+\.weight")
 
 
-class timm_export(object):
-    def __init__(self, model_name):
+class timm_export:
+    def __init__(self, model_name, pretrained=True):
         self.model_name = model_name
         if model_name != "resnet50":
             raise NotImplementedError
 
         with torch.no_grad():
             self.pt_model = timm.create_model(
-                model_name, pretrained=True, num_classes=1000
+                model_name, pretrained=pretrained, num_classes=1000
             )
         self.pt_state = self.pt_model.state_dict()
 
@@ -62,16 +62,11 @@ class timm_export(object):
         conv_w = torch.tensor(conv_w)
         bn_rm = torch.tensor(bn_rm)
         bn_rv = torch.tensor(bn_rv)
-        bn_w = torch.tensor(bn_w)
-        bn_b = torch.tensor(bn_b)
+        conv_b = torch.tensor(conv_b) if conv_b is not None else torch.zeros_like(bn_rm)
+        bn_w = torch.tensor(bn_w) if bn_w is not None else torch.ones_like(bn_rm)
+        bn_b = torch.tensor(bn_b) if bn_b is not None else torch.zeros_like(bn_rm)
         bn_eps = torch.tensor(bn_eps)
 
-        if conv_b is None:
-            conv_b = torch.zeros_like(bn_rm)
-        if bn_w is None:
-            bn_w = torch.ones_like(bn_rm)
-        if bn_b is None:
-            bn_b = torch.zeros_like(bn_rm)
         bn_var_rsqrt = torch.rsqrt(bn_rv + bn_eps)
 
         if transpose:

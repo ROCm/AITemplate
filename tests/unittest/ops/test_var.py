@@ -21,13 +21,15 @@ import torch
 from aitemplate.compiler import compile_model, ops
 from aitemplate.frontend import IntImm, IntVar, Tensor
 from aitemplate.testing import detect_target
-from aitemplate.testing.test_utils import dtype_to_torch_dtype, get_random_torch_tensor
+from aitemplate.testing.test_utils import get_random_torch_tensor
+from aitemplate.utils.torch_utils import string_to_torch_dtype
 
 
 @unittest.skipIf(detect_target().name() == "rocm", "Not supported by ROCM.")
 class VarTestCase(unittest.TestCase):
     def __init__(self, *args, **kwargs):
         super(VarTestCase, self).__init__(*args, **kwargs)
+        self.test_count = 0
 
     def _run_var(
         self,
@@ -39,6 +41,8 @@ class VarTestCase(unittest.TestCase):
         input_type="float16",
         output_type=None,
         copy_op=False,
+        atol=1e-2,
+        rtol=1e-2,
     ):
         torch.manual_seed(0)
         logging.info(
@@ -61,19 +65,25 @@ class VarTestCase(unittest.TestCase):
         logging.info("AITemplate output_shape: {}".format(y_shape))
         logging.info("AITemplate output_type: {}".format(y_dtype))
 
-        test_name = "var"
-        module = compile_model(Y, target, "./tmp", test_name)
+        module = compile_model(Y, target, "./tmp", f"var_{self.test_count}")
         X_pt = get_random_torch_tensor(input_shape, input_type)
-        Y_pt = torch.var(X_pt, dim=dim, unbiased=unbiased, keepdim=keepdim)
+        if output_type is None:
+            torch_dtype = None
+        else:
+            torch_dtype = string_to_torch_dtype(output_type)
+        Y_pt = torch.var(
+            X_pt.to(dtype=torch_dtype), dim=dim, unbiased=unbiased, keepdim=keepdim
+        )
 
-        y = torch.empty(y_shape).cuda().half()
+        y = torch.empty_like(Y_pt)
         module.run_with_tensors([X_pt], [y])
 
         np.testing.assert_equal(y_shape, Y_pt.size())
-        np.testing.assert_equal(dtype_to_torch_dtype(y_dtype), Y_pt.dtype)
-        self.assertTrue(torch.allclose(Y_pt, y, atol=1e-2, rtol=1e-2, equal_nan=True))
+        np.testing.assert_equal(string_to_torch_dtype(y_dtype), Y_pt.dtype)
+        self.assertTrue(torch.allclose(Y_pt, y, atol=atol, rtol=rtol, equal_nan=True))
+        self.test_count += 1
 
-    def test_var(self):
+    def test_var_float16(self):
         self._run_var(dim=-1, unbiased=True, input_shape=[1, 1], keepdim=False)
         self._run_var(dim=-1, unbiased=False, input_shape=[1, 1], keepdim=False)
         self._run_var(dim=-1, unbiased=True, input_shape=[1, 5], keepdim=False)
@@ -95,7 +105,14 @@ class VarTestCase(unittest.TestCase):
         )
 
     def _run_batched_var(
-        self, *, dim, unbiased, keepdim=False, input_type="float16", output_type=None
+        self,
+        *,
+        dim,
+        unbiased,
+        keepdim=False,
+        input_type="float16",
+        output_type=None,
+        test_name="batched_var",
     ):
         torch.manual_seed(0)
         logging.info("Test batched_var with reduction_axes={dim}".format(dim=dim))
@@ -118,7 +135,6 @@ class VarTestCase(unittest.TestCase):
 
         logging.info("AITemplate output_type: {}".format(y_dtype))
 
-        test_name = "batched_var"
         module = compile_model(Y, target, "./tmp", test_name)
 
         for B in [5, 128, 1024, 1237, 2002]:
@@ -128,17 +144,116 @@ class VarTestCase(unittest.TestCase):
             X_pt = get_random_torch_tensor(input_shape, input_type)
             Y_pt = torch.var(X_pt, dim=dim, unbiased=unbiased, keepdim=keepdim)
 
-            y = torch.empty(Y_pt.size()).cuda().half()
+            y = torch.empty_like(Y_pt)
             module.run_with_tensors([X_pt], [y])
 
-            np.testing.assert_equal(dtype_to_torch_dtype(y_dtype), Y_pt.dtype)
+            np.testing.assert_equal(string_to_torch_dtype(y_dtype), Y_pt.dtype)
             self.assertTrue(torch.allclose(Y_pt, y, atol=1e-2, rtol=1e-2))
+        self.test_count += 1
 
     def test_batched_var(self):
-        self._run_batched_var(dim=0, unbiased=False, keepdim=True)
-        self._run_batched_var(dim=1, unbiased=True, keepdim=False)
-        self._run_batched_var(dim=1, unbiased=False, keepdim=True)
-        self._run_batched_var(dim=2, unbiased=True, keepdim=False)
+        self._run_batched_var(
+            dim=0, unbiased=False, keepdim=True, test_name="batched_var_0"
+        )
+        self._run_batched_var(
+            dim=1, unbiased=True, keepdim=False, test_name="batched_var_1"
+        )
+        self._run_batched_var(
+            dim=1, unbiased=False, keepdim=True, test_name="batched_var_2"
+        )
+        self._run_batched_var(
+            dim=2, unbiased=True, keepdim=False, test_name="batched_var_3"
+        )
+
+    @unittest.skipIf(detect_target().name() == "rocm", "fp32 not supported in ROCm")
+    def test_var_float32(self):
+        self._run_var(
+            dim=-1,
+            unbiased=False,
+            input_shape=[2, 8],
+            keepdim=False,
+            input_type="float32",
+            atol=1.3e-6,
+            rtol=1e-5,
+        )
+        self._run_var(
+            dim=-1,
+            unbiased=False,
+            input_shape=[2, 8],
+            keepdim=False,
+            input_type="float16",
+            output_type="float32",
+            atol=1.3e-6,
+            rtol=1e-5,
+        )
+        self._run_var(
+            dim=-1,
+            unbiased=False,
+            input_shape=[3, 2, 2050],
+            keepdim=False,
+            input_type="float32",
+            atol=1.3e-6,
+            rtol=1e-5,
+        )
+        self._run_var(
+            dim=-1,
+            unbiased=False,
+            input_shape=[3, 2, 2050],
+            keepdim=False,
+            input_type="float16",
+            output_type="float32",
+            atol=1.3e-6,
+            rtol=1e-5,
+        )
+        self._run_var(
+            dim=1,
+            unbiased=True,
+            input_shape=[1025, 2047],
+            keepdim=True,
+            input_type="float32",
+            atol=1.3e-6,
+            rtol=1e-5,
+        )
+        self._run_var(
+            dim=1,
+            unbiased=True,
+            input_shape=[1025, 2047],
+            keepdim=True,
+            input_type="float16",
+            output_type="float32",
+            atol=1.3e-6,
+            rtol=1e-5,
+        )
+
+    @unittest.skipIf(detect_target().name() == "rocm", "bf16 not supported in ROCm")
+    def test_var_bfloat16(self):
+        self._run_var(
+            dim=-1,
+            unbiased=False,
+            input_shape=[2, 8],
+            keepdim=False,
+            input_type="bfloat16",
+            atol=1e-1,
+            rtol=1e-1,
+        )
+        self._run_var(
+            dim=-1,
+            unbiased=False,
+            input_shape=[3, 2, 2050],
+            keepdim=False,
+            input_type="bfloat16",
+            atol=1e-1,
+            rtol=1e-1,
+        )
+        self._run_var(
+            dim=1,
+            unbiased=True,
+            input_shape=[1025, 2047],
+            keepdim=True,
+            input_type="bfloat16",
+            atol=1e-1,
+            rtol=1e-1,
+        )
 
 
 if __name__ == "__main__":

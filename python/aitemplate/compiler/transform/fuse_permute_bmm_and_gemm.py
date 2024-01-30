@@ -17,11 +17,9 @@ Perform fusions for permute+bmm operators.
 """
 from typing import Callable, List, Optional, Set, Tuple, Type, Union
 
-from aitemplate.compiler.ops.tensor.permute import permute
-
-from .. import ops
-from ..base import IntImm, Operator, Tensor
-from ..ops.gemm_universal import (
+from aitemplate.compiler import ops
+from aitemplate.compiler.base import IntImm, Operator, Tensor
+from aitemplate.compiler.ops.gemm_universal import (
     bmm_ccr,
     bmm_crr,
     bmm_rcr,
@@ -31,9 +29,11 @@ from ..ops.gemm_universal import (
     gemm_rrr,
     gemm_rrr_bias,
 )
-from ..ops.tensor import permute021
-from .fuse_utils import extract_only_one_op
-from .transform_utils import (
+from aitemplate.compiler.ops.tensor import permute021
+
+from aitemplate.compiler.ops.tensor.permute import permute
+from aitemplate.compiler.transform.fuse_utils import extract_only_one_op
+from aitemplate.compiler.transform.transform_utils import (
     copy_src_op_attributes,
     copy_tensor_attributes,
     remove_dst_op_from_tensor,
@@ -41,6 +41,8 @@ from .transform_utils import (
     replace_tensor,
     sanitize_sorted_graph,
 )
+
+from aitemplate.utils import alignment
 
 # pylint: disable=C0103,W0612
 
@@ -135,16 +137,22 @@ def _fuse_permute_impl(
         # TODO: Check whether the input is weight to have better compile time
         #       optimization on preprocessing of pad etc.
         permute_shape = tensor.shape()
+        permute_dtype = tensor.dtype()
         prepermute_shape = input_tensor.shape()
+        prepermute_dtype = input_tensor.dtype()
 
         if (
             isinstance(prepermute_shape[-1], IntImm)
-            and prepermute_shape[-1].value() % 2 == 1
+            and (
+                not alignment.valid_alignment(
+                    prepermute_shape[-1].value(), prepermute_dtype
+                )
+            )
             and isinstance(permute_shape[-1], IntImm)
-            and permute_shape[-1].value() % 2 == 0
+            and alignment.valid_alignment(permute_shape[-1].value(), permute_dtype)
         ):
             # We don't run the permute+bmm fusion if the permute op could
-            # turn an odd alignment into even alignment.
+            # turn an invalid alignment into a valid alignment.
             continue
 
         fused = True

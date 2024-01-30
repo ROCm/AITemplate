@@ -15,7 +15,7 @@
 """
 conv2d bias module
 """
-from .common_conv2d_bias_act import Conv2dBiasAct
+from aitemplate.frontend.nn.conv2d.common_conv2d_bias_act import Conv2dBiasAct
 
 
 class Conv2dBias(Conv2dBiasAct):
@@ -65,7 +65,7 @@ class Conv2dBias(Conv2dBiasAct):
         in_channels,
         out_channels,
         kernel_size,
-        stride,
+        stride=1,
         padding=0,
         dilation=1,
         groups=1,

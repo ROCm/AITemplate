@@ -17,11 +17,11 @@ BMM_RCR + Softmax + BMM_RRR + Permute Specialization
 """
 from typing import Tuple
 
-from ...base import IntImm, Tensor
-from ...tensor_accessor import TensorAccessor
-from ..common import reshape
-from . import gemm_common as common
-from .bmm import bmm
+from aitemplate.compiler.base import IntImm, Tensor
+from aitemplate.compiler.ops.common import reshape
+from aitemplate.compiler.ops.gemm_universal import gemm_common as common
+from aitemplate.compiler.ops.gemm_universal.bmm import bmm
+from aitemplate.compiler.tensor_accessor import TensorAccessor
 
 # pylint: disable=C0103, W0223, W0221, W0613
 
@@ -70,7 +70,7 @@ class bmm_softmax_bmm_permute(bmm):
         self._attrs["layout"] = "Permute4DBMM_{}".format(layout)
 
         def cal_align_ab(m, n, k):
-            return common.default_align_ab(k, k)
+            return common.default_align_ab(k, k, self._attrs["inputs"][0].dtype())
 
         self._attrs["f_ab_alignment"] = cal_align_ab
 
@@ -168,21 +168,20 @@ class bmm_softmax_bmm_permute(bmm):
         self._sanity_check(a, b)
         output_shape = self._infer_shapes(a, b, b1)
 
-        output = Tensor(output_shape, src_ops={self})
+        output = Tensor(output_shape, src_ops={self}, dtype=a.dtype())
         self._attrs["outputs"] = [output]
         self._attrs["output_accessors"] = [TensorAccessor(output)]
 
         if self._attrs["layout"] == "Permute4DBMM_0213":
             b, m, o = output_shape
             d1 = self._attrs["shape"][0]
-            output_shape = [b.value() // d1, m, d1, o]
+            output_shape = [-1, m, d1, o]
             self._extract_epilogue_alignment(output_shape)
             return reshape()(output, output_shape)
         else:
             raise NotImplementedError(
                 "{} is not implemented!".format(self._attrs["layout"])
             )
-        return output
 
     def _get_op_attributes(self):
         return {

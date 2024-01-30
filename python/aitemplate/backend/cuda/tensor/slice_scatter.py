@@ -16,9 +16,9 @@
 Slice scatter CUDA implementation.
 """
 
-from ... import registry
-from ...backend_spec import CUDASpec
-from ...common.tensor import slice_common
+from aitemplate.backend import registry
+from aitemplate.backend.backend_spec import CUDASpec
+from aitemplate.backend.common.tensor import slice_common
 
 
 @registry.reg("cuda.slice_scatter.func_decl")
@@ -53,8 +53,14 @@ def gen_function(func_attrs):
     """
     # TODO: consider to profile elems_per_thread
     elems_per_thread = 8 if len(func_attrs["inputs"]) == 1 else 256
+    output_accessor = func_attrs["output_accessors"][0]
+    output_offset = output_accessor.offset
     return slice_common.gen_function(
-        func_attrs, backend_spec=CUDASpec(), elems_per_thread=elems_per_thread
+        func_attrs,
+        backend_spec=CUDASpec(),
+        elems_per_thread=elems_per_thread,
+        output_offset=output_offset,
+        update_output_shape=False,
     )
 
 

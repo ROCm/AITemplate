@@ -37,7 +37,7 @@ namespace {
 
 {{func_signature}}
 {
-    topk_launcher<{{dtype}}>(stream, elem_cnt, instance_size, instance_num, top_k, input, workspace, output);
+    topk_launcher<{{dtype}}>(stream, elem_cnt, instance_size, instance_num, top_k, input, workspace, output_index, output_value);
 }
     """
 )
@@ -74,7 +74,8 @@ int main(int argc, char** argv) {
 
 FUNC_SIGNATURE = jinja2.Template(
     """
-void {{func_name}}(int64_t* output,
+void {{func_name}}(int64_t* output_index,
+                   void* output_value,
                    const void* input,
                    const {{index_type}} elem_cnt,
                    const {{index_type}} instance_size,
@@ -94,7 +95,9 @@ FUNC_DECL = jinja2.Template(
 FUNC_CALL_TEMPLATE = jinja2.Template(
     """
 {{indent}}{{func_name}}(
-{{indent}}   {{output}}, {{input}},
+{{indent}}   {{output_index}},
+{{indent}}   {{output_value}},
+{{indent}}   {{input}},
 {{indent}}    {{elem_cnt}},
 {{indent}}    {{instance_size}},
 {{indent}}    {{instance_num}},
@@ -119,32 +122,65 @@ inline size_t GetAlignedSize(size_t size) {
 }
 
 template <typename T>
-T GetZeroVal() {
-  return static_cast<T>(0);
-}
+struct NumericTraits;
 
-template <typename T>
-T GetOneVal() {
-  return static_cast<T>(1);
-}
+template<>
+struct NumericTraits<half> {
+  __host__ __device__
+  static half zero() {
+    return 0;
+  }
 
-template <typename T>
-T GetMinVal() {
-  uint16_t ret = 0xfbff;
-  return *(T*)&ret;
-}
+  __host__ __device__
+  static half one() {
+    uint16_t ret = 0x3c00;
+    return *reinterpret_cast<half*>(&ret);
+  }
 
-template <typename T>
-T GetMaxVal() {
-  uint16_t ret = 0x7bff;
-  return *(T*)&ret;
-}
+  __host__ __device__
+  static half min() {
+    uint16_t ret = 0xfbff;
+    return *reinterpret_cast<half*>(&ret);
+  }
+
+  __host__ __device__
+  static half max() {
+    uint16_t ret = 0x7bff;
+    return *reinterpret_cast<half*>(&ret);
+  }
+};
+
+template<>
+struct NumericTraits<float> {
+
+  __host__ __device__
+  static float zero() {
+    return 0.0;
+  }
+
+  __host__ __device__
+  static float one() {
+    return 1.0;
+  }
+
+  __host__ __device__
+  static float min() {
+    uint32_t ret = 0xff7fffff;
+    return *reinterpret_cast<float*>(&ret);
+  }
+
+  __host__ __device__
+  static float max() {
+    uint32_t ret = 0x7f7fffff;
+    return *reinterpret_cast<float*>(&ret);
+  }
+};
 
 template <typename T>
 T PowOf2Floor(T val, int64_t max_power) {
   T max_floor = static_cast<T>(std::pow(2, max_power));
   val = std::min(val, max_floor);
-  T ret = GetOneVal<T>();
+  T ret = (T) 1;
   while (true) {
     ret *= 2;
     if (ret >= val) {
@@ -157,7 +193,7 @@ template <typename T>
 T PowOf2Ceil(T val, int64_t max_power) {
   T max_ceil = static_cast<T>(std::pow(2, max_power));
   val = std::min(val, max_ceil);
-  T ret = GetOneVal<T>();
+  T ret = (T) 1;
   while (true) {
     ret *= 2;
     if (ret >= val) {
@@ -475,7 +511,8 @@ __global__ void HeapTopKKernel(
     const int64_t heap_size,
     const int64_t init_index,
     const T init_value,
-    int64_t* out_ptr) {
+    int64_t* out_index_ptr,
+    T* out_value_ptr) {
   extern __shared__ char smem[];
   auto* shared_entries = reinterpret_cast<Entry<T>*>(smem);
 
@@ -506,7 +543,8 @@ __global__ void HeapTopKKernel(
 
   // Write top_k elements in sorted array to output
   for (int64_t i = threadIdx.x; i < k; i += blockDim.x) {
-    (out_ptr + blockIdx.x * k)[i] = shared_entries[i].GetIndex();
+    (out_index_ptr + blockIdx.x * k)[i] = shared_entries[i].GetIndex();
+    (out_value_ptr + blockIdx.x * k)[i] = shared_entries[i].GetValue();
   }
 }
 // ALIGNPTR
@@ -533,7 +571,8 @@ void topk_launcher(
     const int top_k,
     const void* input,
     void* workspace,
-    void* output) {
+    void* output_index,
+    void* output_value) {
   const int32_t k = std::min(top_k, instance_size);
 
   if (top_k < 100) {
@@ -558,9 +597,10 @@ void topk_launcher(
             instance_size,
             k,
             heap_size,
-            GetMaxVal<int64_t>(),
-            GetMinVal<T>(),
-            (int64_t*)output);
+            std::numeric_limits<int64_t>::max(),
+            NumericTraits<T>::min(),
+            (int64_t*)output_index,
+            (T*)output_value);
 
   } else {
     const uintptr_t ALIGNMENT = 32;
@@ -588,11 +628,21 @@ void topk_launcher(
         stream);
 
     {{prefix}}Memcpy2DAsync(
-        (int64_t*)output,
+        (int64_t*)output_index,
         k * sizeof(int64_t),
         buf_manager.SortedIndicesPtr(),
         instance_size * sizeof(int64_t),
         k * sizeof(int64_t),
+        instance_num,
+        {{prefix}}MemcpyDefault,
+        stream);
+
+    {{prefix}}Memcpy2DAsync(
+        (T*)output_value,
+        k * sizeof(T),
+        buf_manager.SortedInPtr(),
+        instance_size * sizeof(T),
+        k * sizeof(T),
         instance_num,
         {{prefix}}MemcpyDefault,
         stream);
@@ -673,12 +723,12 @@ def gen_function_call(func_attrs: Dict[str, Any], backend_spec, indent="  ") -> 
     str
         Rendered function call.
     """
-    output_name = ""
-    assert len(func_attrs["outputs"]) == 1
+    assert len(func_attrs["outputs"]) == 2
     assert len(func_attrs["inputs"]) == 1
 
-    output_name = FUNC_CALL_INT64_PARAM_TEMPLATE.render(
-        name=func_attrs["outputs"][0]._attrs["name"]
+    output_value_name = func_attrs["outputs"][0]._attrs["name"]
+    output_index_name = FUNC_CALL_INT64_PARAM_TEMPLATE.render(
+        name=func_attrs["outputs"][1]._attrs["name"]
     )
     input_name = func_attrs["inputs"][0]._attrs["name"]
 
@@ -693,7 +743,8 @@ def gen_function_call(func_attrs: Dict[str, Any], backend_spec, indent="  ") -> 
 
     return FUNC_CALL_TEMPLATE.render(
         func_name=func_attrs["name"],
-        output=output_name,
+        output_index=output_index_name,
+        output_value=output_value_name,
         input=input_name,
         elem_cnt=elem_cnt,
         instance_size=instance_size,

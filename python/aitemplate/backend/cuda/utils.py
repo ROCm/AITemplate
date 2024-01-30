@@ -15,15 +15,22 @@
 """
 Util functions for CUDA codegen.
 """
-from aitemplate.utils.mk_cutlass_lib.mk_cutlass_lib import mk_cutlass_lib
+import logging
 
-from ...utils import logger
-from .. import registry
+from aitemplate.backend import registry
+from aitemplate.utils.environ import (
+    allow_cutlass_sm90_kernels,
+    force_cutlass_sm90_kernels,
+)
+from aitemplate.utils.mk_cutlass_lib.mk_cutlass_lib import mk_cutlass_lib
 
 # pylint: disable=C0103,C0415,W0707
 
 
-class Args(object):
+_LOGGER = logging.getLogger(__name__)
+
+
+class Args:
     def __init__(self, arch):
         self.operations = "all"
         self.build_dir = ""
@@ -37,27 +44,43 @@ class Args(object):
         self.selected_kernel_list = None
         self.interface_dir = None
         self.filter_by_cc = True
+        self.disable_full_archs_compilation = False
 
 
 registry.reg("cuda.make_cutlass_lib")(mk_cutlass_lib)
 
 
 @registry.reg("cuda.gen_cutlass_ops")
-def gen_ops(arch):
+def gen_ops(arch, cuda_version):
     import cutlass_lib
 
     args = Args(arch)
+    if cuda_version is not None:
+        args.cuda_version = cuda_version
     manifest = cutlass_lib.manifest.Manifest(args)
-    try:
-        func = getattr(cutlass_lib.generator, "GenerateSM" + arch)
-        func(manifest, args.cuda_version)
-    except AttributeError as e:
-        raise NotImplementedError(
-            "Arch " + arch + " is not supported by current cutlass lib."
-        ) from e
-    try:
-        func = getattr(cutlass_lib.extra_operation, "GenerateSM" + arch)
-        func(manifest, args)
-    except AttributeError:
-        logger.warning(__file__, "Arch " + arch + " is not supported by extra ops.")
+
+    if arch == "90":
+        if force_cutlass_sm90_kernels():
+            cutlass_lib.generator.GenerateSM90(manifest, args.cuda_version)
+        elif allow_cutlass_sm90_kernels():
+            cutlass_lib.generator.GenerateSM90(manifest, args.cuda_version)
+            cutlass_lib.generator.GenerateSM80(manifest, args.cuda_version)
+            cutlass_lib.extra_operation.GenerateSM80(manifest, args)
+        else:
+            cutlass_lib.generator.GenerateSM80(manifest, args.cuda_version)
+            cutlass_lib.extra_operation.GenerateSM80(manifest, args)
+    else:
+        try:
+            func = getattr(cutlass_lib.generator, "GenerateSM" + arch)
+            func(manifest, args.cuda_version)
+        except AttributeError as e:
+            raise NotImplementedError(
+                "Arch " + arch + " is not supported by current cutlass lib."
+            ) from e
+        try:
+            func = getattr(cutlass_lib.extra_operation, "GenerateSM" + arch)
+            func(manifest, args)
+        except AttributeError:
+            _LOGGER.warning("Arch " + arch + " is not supported by extra ops.")
+
     return manifest.operations

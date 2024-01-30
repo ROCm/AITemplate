@@ -22,8 +22,9 @@ from hashlib import sha1
 
 import jinja2
 
-from ...common import gemm_common
-from ...target import Target
+from aitemplate.backend.common import gemm_common
+from aitemplate.backend.target import Target
+from aitemplate.compiler.base import IntVar
 
 INPUT_ADDR_CALCULATOR = jinja2.Template(
     """
@@ -114,8 +115,7 @@ SRC_TEMPLATE = jinja2.Template(
 #include <random>
 #include <rocrand/rocrand.h>
 #include "logging.h"
-#include "include/ck/utility/print.hpp"
-#include "library/include/ck/library/utility/device_memory.hpp"
+
 #include "library/include/ck/library/utility/host_tensor.hpp"
 #include "library/include/ck/library/utility/host_tensor_generator.hpp"
 #include "include/ck/tensor_operation/gpu/device/tensor_layout.hpp"
@@ -209,6 +209,8 @@ PROBLEM_ARGS_TEMPLATE = jinja2.Template(
 
 {% if gemm_flag == "bias_permute" %}
 {{indent}}                                static_cast<ck::half_t *>(bias_ptr),
+{% elif gemm_flag == "permute" %}
+{{indent}}                                nullptr,
 {% elif gemm_flag == "bias_permute_m2n3" %}
 {{indent}}                                std::array<const void*, 1>{static_cast<ck::half_t *>(bias_ptr)},
 {% elif gemm_flag == "permute_m2n3" %}
@@ -235,6 +237,9 @@ PROBLEM_ARGS_TEMPLATE = jinja2.Template(
 {% endif %}
 {% if gemm_flag == "bias_permute" %}
 {{indent}}                                {M0, M1, M2, N0, N1, stride_D_M0, stride_D_M1, stride_D_M2, stride_D_N0, stride_D_N1},
+{{indent}}                                {M0, M1, M2, N0, N1, stride_E_M0, stride_E_M1, stride_E_M2, stride_E_N0, stride_E_N1},
+{% elif gemm_flag == "permute" %}
+{{indent}}                                {},
 {{indent}}                                {M0, M1, M2, N0, N1, stride_E_M0, stride_E_M1, stride_E_M2, stride_E_N0, stride_E_N1},
 {% elif gemm_flag in ["permute_m2n3", "bias_permute_m2n3", "bias_permute_m3n2"]  %}
 {{indent}}                                a_ms_ks_lengths,
@@ -264,7 +269,7 @@ PROBLEM_ARGS_TEMPLATE = jinja2.Template(
 {{indent}}                                ck::tensor_operation::element_wise::PassThrough{},
 {% if gemm_flag == "" %}
 {{indent}}                                ck::tensor_operation::element_wise::PassThrough{}
-{% elif gemm_flag == "permute_m2n3" %}
+{% elif gemm_flag in ["permute", "permute_m2n3"] %}
 {{indent}}                                ck::tensor_operation::element_wise::PassThrough{}
 {% elif gemm_flag == "bias" or "bias_permute" in gemm_flag %}
 {{indent}}                                ck::tensor_operation::element_wise::Add{}
@@ -312,7 +317,7 @@ TENSOR_DECL_TEMPLATE = jinja2.Template(
   int64_t ptr_max_sz = std::max({a_ptr_sz, b_ptr_sz, c_ptr_sz});
   // TODO: special pool size for 8M L2 cache
   // need to tune it for other devices
-  int64_t mem_pool_sz = std::max(2,  std::min(64, int((1 << 23) / ptr_max_sz)));
+  int64_t mem_pool_sz = std::max(1,  std::min(64, int((1 << 23) / ptr_max_sz)));
 
   memory_pool->AllocateHalfTensor(a_ptr_sz, mem_pool_sz);  // x: index 0
   memory_pool->AllocateHalfTensor(b_ptr_sz, mem_pool_sz);  // w: index 1
@@ -398,24 +403,7 @@ struct ProfilerMemoryPool {
   rocrand_generator generator;
 };
 
-// hack for DeviceMem linking error
-// TODO fix this by making CK a header-only lib
-// <<< hack begin
-DeviceMem::DeviceMem(std::size_t mem_size) : mMemSize(mem_size)
-{
-  hipGetErrorString(hipMalloc(static_cast<void**>(&mpDeviceBuf), mMemSize));
-}
-void* DeviceMem::GetDeviceBuffer() const { return mpDeviceBuf; }
-void DeviceMem::ToDevice(const void* p) const
-{
-  hipGetErrorString(
-        hipMemcpy(mpDeviceBuf, const_cast<void*>(p), mMemSize, hipMemcpyHostToDevice));
-}
-void DeviceMem::FromDevice(void* p) const
-{
-  hipGetErrorString(hipMemcpy(p, mpDeviceBuf, mMemSize, hipMemcpyDeviceToHost));
-}
-DeviceMem::~DeviceMem() { hipGetErrorString(hipFree(mpDeviceBuf)); }
+
 struct KernelTimerImpl
 {
   KernelTimerImpl() {
@@ -463,13 +451,13 @@ int main(int argc, char** argv) {
   {{tensor_decl}}
   // TODO: random init
   // warmup
-  for(int i = 0; i < 3; ++i) {
+  for(int i = 0; i < 5; ++i) {
     {{func_call}}
   }
   // run
   auto timer = new KernelTimerImpl();
   timer->Start();
-  for(int i = 0; i < 5; ++i) {
+  for(int i = 0; i < 10; ++i) {
     {{func_call}}
   }
   timer->End();
@@ -646,6 +634,7 @@ def gen_profiler(
     file_pairs = []
     has_d0_flag = has_d0(func_attrs)
     has_d1_flag = has_d1(func_attrs)
+
     for op_name, op in op_instance.items():
         config = emit_instance(op)
         config_name = extract_config_name(config)
@@ -812,6 +801,13 @@ def gen_function(
             problem_args=problem_args,
             is_profiler=False,
         )
+        has_dynamic_shape = False
+        for inp in func_attrs["inputs"]:
+            for dim in inp.shape():
+                if isinstance(dim, IntVar) and (len(dim._attrs['values']) > 1):
+                    has_dynamic_shape = True
+        if has_dynamic_shape:
+            key = "true"
         exec_inst = exec_cond_template.render(indent="  ", cond=key, program=program)
         exec_paths += exec_inst
     extra_header = extra_header_template.render(
@@ -992,4 +988,15 @@ def make_fproc_f16(func_attrs, layout, op_kind, extra_kind):
             c_layout=c_layout,
         )
 
+    has_dynamic_shape = False
+    for inp in func_attrs["inputs"]:
+        for dim in inp.shape():
+            if isinstance(dim, IntVar) and (len(dim._attrs['values']) > 1):
+                has_dynamic_shape = True
     func_attrs["op_instance"] = extract_config(op_kind, extra_kind, fproc_f16)
+    if has_dynamic_shape:
+        filtered_op_instance = {}
+        for op_name, op in func_attrs["op_instance"].items():
+            if "Padding" in emit_instance(op):
+                filtered_op_instance[op_name] = op
+        func_attrs["op_instance"] = filtered_op_instance

@@ -16,6 +16,7 @@
 Argmax.
 """
 import itertools
+import logging
 import os
 import re
 from collections import OrderedDict
@@ -24,12 +25,14 @@ from typing import List
 import jinja2
 import numpy as np
 
-from .... import backend
-from ....backend import registry
-from ....utils import logger, shape_utils
-from ...base import Operator, Tensor
+from aitemplate import backend
+from aitemplate.backend import registry
+from aitemplate.compiler.base import Operator, Tensor
 
 # pylint: disable=C0103,W0221,W0102,W0223
+
+
+_LOGGER = logging.getLogger(__name__)
 
 EXEC_KEY_TEMPLATE = jinja2.Template(
     """
@@ -60,30 +63,9 @@ class argmax(Operator):
         self._attrs["workspace"] = 0
         self.exec_key_template = EXEC_KEY_TEMPLATE
 
-    def _infer_shape(self, x: List[int]):
-        """Infer the output shape"""
-        output = list(x)[:-1]
-        return output
-
     def _infer_shapes(self, x: Tensor):
         """Infer the output shape"""
-        x_shape_values = [var._attrs["values"] for var in x._attrs["shape"]]
-        x_shapes = itertools.product(*x_shape_values)
-        # run infershape for each
-        y_shapes = []
-        for x_shape in x_shapes:
-            y_shape = self._infer_shape(x_shape)
-            y_shapes.append(y_shape)
-
-        def unique(vector):
-            return sorted(set(vector))
-
-        output_shape = []
-        for idx in range(len(y_shapes[0])):
-            output_shape.append(
-                shape_utils.gen_int_var(values=unique([d[idx] for d in y_shapes]))
-            )
-        return output_shape
+        return x._attrs["shape"][:-1]
 
     def __call__(self, x: Tensor) -> Tensor:
         """call the op
@@ -152,7 +134,7 @@ class argmax(Operator):
         cmd.append(x_shape[0])
         cmd.append(x_shape[1])
         command = [str(x) for x in cmd]
-        logger.info(__name__, "profiling cmd: {}".format(command))
+        _LOGGER.info("profiling cmd: {}".format(command))
         return command
 
     def _profile_single_workload(self, profiler_prefix, exec_key, devices):
@@ -198,8 +180,7 @@ class argmax(Operator):
         profiler_prefix = os.path.join(workdir, "profiler", self._attrs["op"])
 
         for wkl in workloads:
-            logger.info(
-                __name__,
+            _LOGGER.info(
                 "Profile: {name}: {wkl}".format(name=self._attrs["name"], wkl=wkl),
             )
             workspace = self._profile_single_workload(profiler_prefix, wkl, devices)

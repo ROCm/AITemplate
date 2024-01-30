@@ -13,7 +13,7 @@
 #  limitations under the License.
 #
 """
-bert_embeddings kernel codegen for CUDA.
+bert_embeddings kernel codegen for ROCM.
 """
 
 import math
@@ -21,8 +21,8 @@ from typing import Any, Dict
 
 import jinja2
 
-from ... import registry
-from ...backend_spec import ROCMSpec
+from aitemplate.backend import registry
+from aitemplate.backend.backend_spec import ROCMSpec
 
 # pylint: disable=C0301
 
@@ -31,25 +31,30 @@ FUNC_TEMPLATE = jinja2.Template(
 #include "logging.h"
 #include "ck/ck.hpp"
 #include "ck/tensor_operation/gpu/device/impl/device_sparse_embeddings_forward_layernorm.hpp"
+#include "ck/tensor_operation/gpu/element/element_wise_operation.hpp"
 
 #define EMBEDDING_DIM {{embedding_dim}}
 
+using EmbElementwiseOperation = ck::tensor_operation::element_wise::AddAdd;
+using EmbType = {{elem_input_type}};
+using IndexType = {{index_type}};
+
 {{func_signature}}
 {
-  auto device_instance = ck::tensor_operation::device::DeviceSparseEmbeddingsForwardLayernorm<{{elem_input_type}}, {{index_type}}, {{elem_input_type}}, {{elem_input_type}}, float, {{elem_input_type}}, 256, 1, 256, 1, EMBEDDING_DIM, 1, {{row_v_size}}, 3>{};
+  auto device_instance = ck::tensor_operation::device::DeviceSparseEmbeddingsForwardLayernorm<EmbType, IndexType, EmbType, EmbType, float, EmbType, EmbElementwiseOperation, 256, 1, 256, 1, EMBEDDING_DIM, 1, {{row_v_size}}, 3>{};
   auto argument_ptr = device_instance.MakeArgumentPointer(output,
-                                                          word_embeddings,
-                                                          token_type_embeddings,
-                                                          position_embeddings,
-                                                          input_ids,
-                                                          token_type_ids,
-                                                          position_ids,
+                                                          {ck::type_convert<EmbType*>(word_embeddings),
+                                                          ck::type_convert<EmbType*>(token_type_embeddings),
+                                                          ck::type_convert<EmbType*>(position_embeddings)},
+                                                          {ck::type_convert<IndexType*>(input_ids),
+                                                          ck::type_convert<IndexType*>(token_type_ids),
+                                                          ck::type_convert<IndexType*>(position_ids)},
                                                           gamma,
                                                           beta,
-                                                          8,
                                                           EMBEDDING_DIM,
                                                           indices_num,
-                                                          eps);
+                                                          eps,
+                                                          EmbElementwiseOperation{});
   if(!device_instance.IsSupportedArgument(argument_ptr.get())){
     LOG(FATAL) << "wrong! " << device_instance.GetTypeString() << " with the specified compilation parameters does not support this Embedding problem.";
   }
@@ -128,9 +133,9 @@ def python_int_dtype_to_c_dtype(dtype):
 @registry.reg("rocm.bert_embeddings.gen_function")
 def bert_embeddings_gen_function(func_attrs: Dict[str, Any]) -> str:
     backend_spec = ROCMSpec()
-    elem_input_type = backend_spec.dtype_to_ck_type[
+    elem_input_type = backend_spec.dtype_to_lib_type(
         func_attrs["inputs"][3]._attrs["dtype"]
-    ]
+    )
     (
         input_ids,
         token_type_ids,

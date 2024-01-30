@@ -16,16 +16,21 @@
 Util functions for graph transformations.
 """
 
+import logging
 from collections import deque
 from typing import Dict, List, Union
 
-from aitemplate.compiler.stable_set import StableSet
+from aitemplate.compiler.base import Operator, Tensor
 
-from ...utils import graph_utils, logger
-from ..base import Operator, Tensor
-from .mark_param_tensor import mark_param_tensor
-from .name_graph import name_graph
-from .remove_unused_ops import remove_unused_ops
+from aitemplate.compiler.stable_set import StableSet
+from aitemplate.compiler.transform.mark_param_tensor import mark_param_tensor
+from aitemplate.compiler.transform.name_graph import name_graph
+from aitemplate.compiler.transform.remove_unused_ops import remove_unused_ops
+
+from aitemplate.utils import graph_utils
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def check_graph_validity(sorted_graph: List[Tensor], raiseError: bool = False) -> bool:
@@ -37,8 +42,8 @@ def check_graph_validity(sorted_graph: List[Tensor], raiseError: bool = False) -
 
     def handleError(msg: str):
         if raiseError:
-            logger.info(__file__, "check_graph_validity() error! Graph:")
-            logger.info(__file__, graph_utils.sorted_graph_debug_str(sorted_graph))
+            _LOGGER.info("check_graph_validity() error! Graph:")
+            _LOGGER.info(graph_utils.sorted_graph_debug_str(sorted_graph))
             raise RuntimeError(msg)
         else:
             return False
@@ -222,7 +227,8 @@ def remove_view_op_from_sorted_graph(op: Operator) -> None:
     input_tensor = op._attrs["inputs"][0]
     output_tensor = op._attrs["outputs"][0]
 
-    input_tensor._attrs["dst_ops"] = output_tensor._attrs["dst_ops"]
+    input_tensor._attrs["dst_ops"].remove(op)
+    input_tensor._attrs["dst_ops"].update(output_tensor._attrs["dst_ops"])
     for dst_op in output_tensor._attrs["dst_ops"]:
         dst_op.replace_input_tensor(output_tensor, input_tensor)
     if output_tensor._attrs["is_output"]:
@@ -254,7 +260,7 @@ def sanitize_sorted_graph(sorted_graph: List[Tensor]) -> List[Tensor]:
     """
     Removes tensors whose src_op and dst_ops are empty.
     Inputs and outputs are always kept in the graph.
-    Names unamed tensors.
+    Names unnamed tensors.
     """
 
     if len(sorted_graph) == 1:

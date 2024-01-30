@@ -18,10 +18,10 @@ Swap the dimension of dim0 and dim2 of input 3d tensor.
 """
 from typing import List
 
-from aitemplate.backend import registry
+from aitemplate import backend
 
-from .... import backend
-from ...base import Operator, Tensor
+from aitemplate.backend import registry
+from aitemplate.compiler.base import Operator, Tensor
 
 # pylint: disable=C0103,W0221
 
@@ -91,6 +91,7 @@ class permute210(Operator):
         self._set_depth()
         output_shape = self._infer_shapes(x)
         output = Tensor(output_shape, src_ops={self})
+        output._attrs["dtype"] = x.dtype()
         self._attrs["outputs"] = [output]
         return output
 

@@ -13,8 +13,9 @@
 #  limitations under the License.
 #
 """
-Unittests for vanilla_attenion.
+Unittests for vanilla_attention.
 """
+import logging
 import math
 import os
 import unittest
@@ -26,8 +27,11 @@ from aitemplate.compiler import compile_model, Model
 from aitemplate.frontend import nn, Tensor
 from aitemplate.frontend.nn.vanilla_attention import vanilla_attention
 from aitemplate.testing import detect_target
-from aitemplate.utils import logger, shape_utils
+from aitemplate.utils import shape_utils
 from einops import rearrange
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def mark_output(y):
@@ -77,7 +81,7 @@ def attention_pt(X_pt, W_pt, B_pt, nheads, d, seqlen):
     qkv_pt = torch.permute(qkv_pt, [2, 0, 3, 1, 4])  # [3, 1, 12, 4096, 64]
 
     q_pt, k_pt, v_pt = torch.split(qkv_pt, 1, dim=0)  # [1, 1, 12, 4096, 64]
-    scale_pt = torch.tensor(64 ** -0.5)
+    scale_pt = torch.tensor(64**-0.5)
     q_pt = q_pt * (scale_pt)
     # #[12, 4096, 64] * [12, 64, 4096] => [12, 4096, 4096]
     attn_pt = torch.bmm(
@@ -92,7 +96,7 @@ def attention_pt(X_pt, W_pt, B_pt, nheads, d, seqlen):
     return Y_pt
 
 
-class vanillaAttentionTestCase(unittest.TestCase):
+class VanillaAttentionTestCase(unittest.TestCase):
     def _test_vanilla_attention(
         self,
         batch_size=16,
@@ -199,9 +203,7 @@ class vanillaAttentionTestCase(unittest.TestCase):
                 [y],
                 count=100,
             )
-            logger.info(
-                __file__, "benchmark vanilla-attn time: {0}".format(time_per_iter_ms)
-            )
+            _LOGGER.info("benchmark vanilla-attn time: {0}".format(time_per_iter_ms))
 
         self.assertTrue(torch.allclose(y_pt.half(), y, atol=1e-1, rtol=1e-1))
 
@@ -234,6 +236,7 @@ class vanillaAttentionTestCase(unittest.TestCase):
         num_heads=2,
         use_fp16_acc=False,
         benchmark_ait=False,
+        name="cross_attn_dynamic",
     ):
         pt_mod = (
             torch.nn.MultiheadAttention(
@@ -287,7 +290,7 @@ class vanillaAttentionTestCase(unittest.TestCase):
         Y = Y + inputs_ait
         mark_output(Y)
         target = detect_target(use_fp16_acc=False)
-        exe_module = compile_model(Y, target, "./tmp", "cross_attn_dynamic")
+        exe_module = compile_model(Y, target, "./tmp", name)
         for name, weight in params_ait.items():
             exe_module.set_constant_with_tensor(name, weight)
 
@@ -317,17 +320,32 @@ class vanillaAttentionTestCase(unittest.TestCase):
                     ys,
                     count=100,
                 )
-                logger.info(
-                    __file__, "benchmark cross-attn time: {0}".format(time_per_iter_ms)
-                )
+                _LOGGER.info("benchmark cross-attn time: {0}".format(time_per_iter_ms))
 
     def test_cross_attn(self):
-        self._test_mha(batch_sizes=[1], seqlen=2, seqlen_kv=32, dim=512, num_heads=8)
         self._test_mha(
-            batch_sizes=[128, 256, 512], seqlen=1, seqlen_kv=62, dim=512, num_heads=8
+            batch_sizes=[1],
+            seqlen=2,
+            seqlen_kv=32,
+            dim=512,
+            num_heads=8,
+            name="single_batch",
         )
         self._test_mha(
-            batch_sizes=[1, 32, 64], seqlen=128, seqlen_kv=62, dim=512, num_heads=8
+            batch_sizes=[128, 256, 512],
+            seqlen=1,
+            seqlen_kv=62,
+            dim=512,
+            num_heads=8,
+            name="batches_seq_1",
+        )
+        self._test_mha(
+            batch_sizes=[1, 32, 64],
+            seqlen=128,
+            seqlen_kv=62,
+            dim=512,
+            num_heads=8,
+            name="batches_seq_128",
         )
 
 

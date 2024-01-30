@@ -16,8 +16,8 @@
 GEMM Specialization for A[RowMajor], B[ColMajor], C[RowMajor]
 """
 
-from ...base import IntImm, Tensor
-from . import gemm_common as common
+from aitemplate.compiler.base import IntImm, Tensor
+from aitemplate.compiler.ops.gemm_universal import gemm_common as common
 
 # pylint: disable=C0103,W0223,W0221,W0613
 
@@ -40,7 +40,7 @@ class gemm_rcr(common.gemm):
         self._attrs["op"] = "gemm_rcr"
 
         def cal_align_ab(m, n, k):
-            return common.default_align_ab(k, k)
+            return common.default_align_ab(k, k, self._attrs["inputs"][0].dtype())
 
         self._attrs["f_ab_alignment"] = cal_align_ab
 

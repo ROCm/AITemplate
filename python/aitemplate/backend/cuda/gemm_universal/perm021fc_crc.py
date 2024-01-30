@@ -16,15 +16,17 @@
 Codegen functions for perm021fc_crc, which computes
 [b, n, m](col) = bmm([1, k, n](col), [b, k, m](row)).
 """
-from ... import registry
-from . import bmm_common, common
+from aitemplate.backend import registry
+from aitemplate.backend.cuda.gemm_universal import bmm_common, common
 
 # pylint: disable=C0103,C0415,W0613,C0301,R1705,R1703
 
 
 def _get_problem_info(**kwargs):
     problem_args = {
-        "problem_size": "{N, M, K}",
+        "problem_dim_0": "N",
+        "problem_dim_1": "M",
+        "problem_dim_2": "K",
         "bias_ptr": "c_ptr",
         "a_batch_stride": "0",
         "b_batch_stride": "K * M",
@@ -47,20 +49,13 @@ def gemm_crc_config(func_attrs, dtype="float16"):
     def fproc(op):
         import cutlass_lib
 
-        from ...backend_spec import CUDASpec
-
-        backend_spec = CUDASpec()
-        elem_type = backend_spec.dtype_to_lib_type(
-            func_attrs["inputs"][0]._attrs["dtype"]
-        )
-
         return common.default_fproc(
             op=op,
             a_layout=cutlass_lib.library.LayoutType.ColumnMajor,
             b_layout=cutlass_lib.library.LayoutType.RowMajor,
             c_layout=cutlass_lib.library.LayoutType.ColumnMajor,
-            elem_type=elem_type,
-            epiligue_name=func_attrs["epilogue"],
+            dtype=func_attrs["inputs"][0].dtype(),
+            epilogue_name=func_attrs["epilogue"],
         )
 
     func_attrs["op_instance"] = common.extract_config(fproc)

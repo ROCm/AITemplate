@@ -22,7 +22,7 @@ from hashlib import sha1
 
 import jinja2
 
-from ...target import Target
+from aitemplate.backend.target import Target
 
 # pylint: disable=C0103,C0415,W0611,C0301
 
@@ -104,7 +104,7 @@ EXEC_TEMPLATE = jinja2.Template(
 
 HEADER_CODE = jinja2.Template(
     """
-#include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_fwd_multiple_d_xdl_cshuffle.hpp"
+#include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_fwd_multiple_abd_xdl_cshuffle.hpp"
 """
 )
 
@@ -119,8 +119,8 @@ SRC_TEMPLATE = jinja2.Template(
 #include <random>
 #include <rocrand/rocrand.h>
 #include "logging.h"
-#include "include/ck/utility/print.hpp"
-#include "library/include/ck/library/utility/device_memory.hpp"
+
+
 #include "library/include/ck/library/utility/host_tensor.hpp"
 #include "library/include/ck/library/utility/host_tensor_generator.hpp"
 #include "include/ck/tensor_operation/gpu/device/tensor_layout.hpp"
@@ -284,7 +284,7 @@ ARGS_PARSE_TEMPLATE = jinja2.Template(
   const int64_t stride = std::stoi(argv[8]);
   const int64_t pad = std::stoi(argv[9]);
   const int64_t dilation = std::stoi(argv[10]);
-  const int64_t group = std::stoi(argv[11]);
+  const int64_t group = std::stoi(argv[14]);
 """
 )
 
@@ -296,7 +296,7 @@ TENSOR_DECL_TEMPLATE = jinja2.Template(
   int64_t ptr_max_sz = std::max({a_ptr_sz, b_ptr_sz, c_ptr_sz});
   // TODO: special pool size for 8M L2 cache
   // need to tune it for other devices
-  int64_t mem_pool_sz = std::max(2,  std::min(64, int((1 << 23) / ptr_max_sz)));
+  int64_t mem_pool_sz = std::max(1,  std::min(64, int((1 << 23) / ptr_max_sz)));
 
   memory_pool->AllocateHalfTensor(a_ptr_sz, mem_pool_sz);  // x: index 0
   memory_pool->AllocateHalfTensor(b_ptr_sz, mem_pool_sz);  // w: index 1
@@ -386,24 +386,6 @@ struct ProfilerMemoryPool {
   rocrand_generator generator;
 };
 
-// hack for DeviceMem linking error
-// TODO fix this by making CK a header-only lib
-// <<< hack begin
-DeviceMem::DeviceMem(std::size_t mem_size) : mMemSize(mem_size)
-{
-  hipGetErrorString(hipMalloc(static_cast<void**>(&mpDeviceBuf), mMemSize));
-}
-void* DeviceMem::GetDeviceBuffer() const { return mpDeviceBuf; }
-void DeviceMem::ToDevice(const void* p) const
-{
-  hipGetErrorString(
-        hipMemcpy(mpDeviceBuf, const_cast<void*>(p), mMemSize, hipMemcpyHostToDevice));
-}
-void DeviceMem::FromDevice(void* p) const
-{
-  hipGetErrorString(hipMemcpy(p, mpDeviceBuf, mMemSize, hipMemcpyDeviceToHost));
-}
-DeviceMem::~DeviceMem() { hipGetErrorString(hipFree(mpDeviceBuf)); }
 struct KernelTimerImpl
 {
   KernelTimerImpl() {
@@ -452,13 +434,13 @@ int main(int argc, char** argv) {
   {{tensor_decl}}
   // TODO: random init
   // warmup
-  for(int i = 0; i < 3; ++i) {
+  for(int i = 0; i < 5; ++i) {
     {{func_call}}
   }
   // run
   auto timer = new KernelTimerImpl();
   timer->Start();
-  for(int i = 0; i < 5; ++i) {
+  for(int i = 0; i < 10; ++i) {
     {{func_call}}
   }
   timer->End();
@@ -570,7 +552,6 @@ def gen_profiler(
     src_template=SRC_TEMPLATE,
     prob_args_template=PROBLEM_ARGS_TEMPLATE,
 ):
-
     """Generates standalone executables for profiler.
 
     Parameters
@@ -601,9 +582,12 @@ def gen_profiler(
         w_dim0="out_ch",
         w_dim1="kernel_h",
         w_dim2="kernel_w",
-        stride="stride",
-        dilate="dilation",
-        pad="pad",
+        strideh="stride",
+        dilateh="dilation",
+        padh="pad",
+        stridew="stride",
+        dilatew="dilation",
+        padw="pad",
     )
     file_pairs = []
     for op_name, op in op_instance.items():
@@ -681,7 +665,7 @@ def gen_profiler(
 
 def gen_function(
     func_attrs,
-    exec_cond_remplate,
+    exec_cond_template,
     shape_eval_template,
     shape_save_template,
     conv2d_flag,
@@ -694,7 +678,7 @@ def gen_function(
     ----------
     func_attrs : Dict
         Operation attributes.
-    exec_cond_remplate : jinja2.Template
+    exec_cond_template : jinja2.Template
         Generates if statement to execute kernel.
     shape_eval_template : jinja2.Template
         Generates shape calculation.
@@ -743,9 +727,12 @@ def gen_function(
         w_dim0="*out_ch",
         w_dim1="*kernel_h",
         w_dim2="*kernel_w",
-        stride="stride",
-        dilate="dilation",
-        pad="pad",
+        strideh="stride",
+        dilateh="dilation",
+        padh="pad",
+        stridew="stride",
+        dilatew="dilation",
+        padw="pad",
         div="/",
     )
     shape_save_func = shape_save_template.render(
@@ -769,7 +756,7 @@ def gen_function(
             problem_args=problem_args,
             is_profiler=False,
         )
-        exec_inst = exec_cond_remplate.render(indent="  ", cond=key, program=program)
+        exec_inst = exec_cond_template.render(indent="  ", cond=key, program=program)
         exec_paths += exec_inst
     return src_template.render(
         instances=instance_decl,

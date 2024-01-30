@@ -23,8 +23,8 @@ import jinja2
 
 INSTANCE_TEMPLATE = jinja2.Template(
     """
-using {{name}} = ck::tensor_operation::device::DevicePool2dFwd_Input_N_Hi_Wi_C_Output_N_Ho_Wo_C<
-ck::half_t, ck::half_t, float, {{reduce_func}}, false, 64, 64, 1, 4, 1, 4>;
+using {{name}} = ck::tensor_operation::device::DevicePool2dFwd_NHWC_NHWC<
+ck::half_t, ck::half_t, ck::index_t, float, {{reduce_func}}, false, 64, 64, 1, 4, 1, 4>;
 """
 )
 
@@ -35,14 +35,17 @@ EXEC_TEMPLATE = jinja2.Template(
 {{indent}}auto argument_ptr = op.MakeArgumentPointer(static_cast<ck::half_t *>(in_ptr),
 {{indent}}                                           static_cast<ck::half_t *>(out_ptr),
 {{indent}}                                           nullptr,
-{{indent}}                                           *batch,
-{{indent}}                                           *in_ch,
 {{indent}}                                           input_shape,
 {{indent}}                                           kernel_shape,
 {{indent}}                                           output_shape,
+{{indent}}                                           input_stride,
+{{indent}}                                           output_stride,
+{{indent}}                                           indices_stride,
 {{indent}}                                           conv_filter_strides,
+{{indent}}                                           dilations,
 {{indent}}                                           input_left_pads,
-{{indent}}                                           input_right_pads);
+{{indent}}                                           input_right_pads,
+{{indent}}                                           {2, 3});
 {{indent}}if(!op.IsSupportedArgument(argument_ptr.get())) {
 {{indent}}  LOG(FATAL) << "wrong! " << op.GetTypeString() << " with the specified compilation parameters does not support this Pool problem.";
 {{indent}}}
@@ -59,8 +62,7 @@ SRC_TEMPLATE = jinja2.Template(
 #include <cstdlib>
 #include <stdlib.h>
 #include "logging.h"
-#include "include/ck/utility/print.hpp"
-#include "library/include/ck/library/utility/device_memory.hpp"
+
 #include "library/include/ck/library/utility/host_tensor.hpp"
 #include "library/include/ck/library/utility/host_tensor_generator.hpp"
 #include "include/ck/tensor_operation/gpu/device/tensor_layout.hpp"
@@ -88,18 +90,22 @@ void {{function_name}}(
     ) {
   {{shape_function}}
 
-  const std::array<ck::index_t, 2> conv_filter_strides{static_cast<ck::index_t>(stride),
+  const std::vector<ck::index_t> conv_filter_strides{static_cast<ck::index_t>(stride),
     static_cast<ck::index_t>(stride)};
-  const std::array<ck::index_t, 2> input_left_pads{static_cast<ck::index_t>(pad),
+  const std::vector<ck::index_t> input_left_pads{static_cast<ck::index_t>(pad),
     static_cast<ck::index_t>(pad)};
-  const std::array<ck::index_t, 2> input_right_pads{static_cast<ck::index_t>(pad),
+  const std::vector<ck::index_t> input_right_pads{static_cast<ck::index_t>(pad),
     static_cast<ck::index_t>(pad)};
-  const std::array<ck::index_t, 2> input_shape{static_cast<ck::index_t>(*in_h),
+  const std::vector<ck::index_t> input_shape{static_cast<ck::index_t>(*batch), static_cast<ck::index_t>(*in_ch), static_cast<ck::index_t>(*in_h),
     static_cast<ck::index_t>(*in_w)};
-  const std::array<ck::index_t, 2> kernel_shape{static_cast<ck::index_t>(kernel_h),
-    static_cast<ck::index_t>(kernel_w)};
-  const std::array<ck::index_t, 2> output_shape{static_cast<ck::index_t>(*out_h),
+  const std::vector<ck::index_t> kernel_shape{static_cast<ck::index_t>(kernel_h), static_cast<ck::index_t>(kernel_w)};
+  const std::vector<ck::index_t> output_shape{static_cast<ck::index_t>(*batch), static_cast<ck::index_t>(*in_ch), static_cast<ck::index_t>(*out_h),
     static_cast<ck::index_t>(*out_w)};
+
+  const std::vector<ck::index_t> input_stride{static_cast<ck::index_t>(CI*HI*WI), 1, static_cast<ck::index_t>(WI*CI), static_cast<ck::index_t>(CI)};
+  const std::vector<ck::index_t> output_stride{static_cast<ck::index_t>(CI*HO*WO), 1, static_cast<ck::index_t>(WO*CI), static_cast<ck::index_t>(CI)};
+  const std::vector<ck::index_t> indices_stride{static_cast<ck::index_t>(CI*HO*WO), 1, static_cast<ck::index_t>(WO*CI), static_cast<ck::index_t>(CI)};
+  const std::vector<ck::index_t> dilations{1, 1};
 
   {{exec_paths}}
 
@@ -156,7 +162,7 @@ FUNC_CALL_TEMPLATE = jinja2.Template(
 
 def gen_function(
     func_attrs,
-    exec_cond_remplate,
+    exec_cond_template,
     shape_eval_template,
     shape_save_template,
 ):
@@ -226,7 +232,7 @@ def gen_function(
     for key in instances:
         fname = "f" + sha1(key.encode()).hexdigest()
         program = EXEC_TEMPLATE.render(indent="    ", instance=fname)
-        exec_inst = exec_cond_remplate.render(indent="  ", cond=key, program=program)
+        exec_inst = exec_cond_template.render(indent="  ", cond=key, program=program)
         exec_paths += exec_inst
     return SRC_TEMPLATE.render(
         instances=instance_decl,

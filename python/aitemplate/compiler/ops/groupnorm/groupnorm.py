@@ -15,6 +15,8 @@
 """
 Operator definition for groupnorm.
 """
+import itertools
+import logging
 import os
 import re
 from collections import OrderedDict
@@ -23,23 +25,45 @@ from typing import Any, List, Union
 
 import jinja2
 
-from aitemplate.testing import detect_target
+from aitemplate import backend
+from aitemplate.backend import registry
+from aitemplate.backend.target import Target
+from aitemplate.compiler.base import (
+    DynamicProfileStrategy,
+    ExecItem,
+    IntImm,
+    IntVar,
+    Operator,
+    Tensor,
+)
+from aitemplate.compiler.ops.softmax.cache_entry import NormQueryEntry, NormRecordEntry
 
-from .... import backend
-from ....backend import registry
-from ....backend.target import Target
-from ....utils import logger
-from ...base import DynamicProfileStrategy, ExecItem, IntImm, IntVar, Operator, Tensor
-from ..softmax.cache_entry import NormQueryEntry, NormRecordEntry
+from aitemplate.testing import detect_target
+from aitemplate.utils import shape_utils
 
 # pylint: disable=C0103,W0221,W0102,W0223
 
+
+_LOGGER = logging.getLogger(__name__)
 
 EXEC_COND_TEMPLATE = jinja2.Template(
     """
 {{indent}}if ({{cond}}) {
 {{indent}}  {{program}}
 {{indent}}}
+"""
+)
+
+SHAPE_FUNC_TEMPLATE = jinja2.Template(
+    """
+{{indent}}{{dtype}}NI = {{x_dim0}};
+{{indent}}{{dtype}}HI = {{x_dim1}};
+{{indent}}{{dtype}}WI = {{x_dim2}};
+{{indent}}{{dtype}}CI = {{x_dim3}};
+{{indent}}{{dtype}}NO = NI;
+{{indent}}{{dtype}}HO = HI;
+{{indent}}{{dtype}}WO = WI;
+{{indent}}{{dtype}}CO = {{x_dim3}};
 """
 )
 
@@ -58,19 +82,21 @@ class group_norm(Operator):
             self._attrs["has_profiler"] = True
         self._attrs["num_channels"] = num_channels
         self._attrs["workspace"] = 0
+        self.shape_eval_template = SHAPE_FUNC_TEMPLATE
 
     @staticmethod
     def check_shapes(x_shapes, gamma_shapes, beta_shapes, num_groups):
         # check last dim can be divided by num_groups
         # minimal group: 8
-        if len(gamma_shapes) != len(beta_shapes):
-            raise RuntimeError(
-                f"Gamma and beta must have the same number of dimensions, but got {len(gamma_shapes)} and {len(beta_shapes)}"
-            )
-        if x_shapes[-1].value() != gamma_shapes[0].value():
-            raise RuntimeError(
-                f"Input last dim {x_shapes[-1]} must be equal to gamma dim {gamma_shapes[0]}"
-            )
+        if gamma_shapes is not None and beta_shapes is not None:
+            if len(gamma_shapes) != len(beta_shapes):
+                raise RuntimeError(
+                    f"Gamma and beta must have the same number of dimensions, but got {len(gamma_shapes)} and {len(beta_shapes)}"
+                )
+            if x_shapes[-1].value() != gamma_shapes[0].value():
+                raise RuntimeError(
+                    f"Input last dim {x_shapes[-1]} must be equal to gamma dim {gamma_shapes[0]}"
+                )
         if x_shapes[-1].value() % num_groups != 0:
             raise RuntimeError(
                 f"Channel dim {gamma_shapes[0]} must be divisible by num_groups {num_groups}"
@@ -101,8 +127,51 @@ class group_norm(Operator):
 
     def _infer_shapes(self, x: Tensor):
         """Infer shapes for groupnorm."""
-
         return x._attrs["shape"]
+
+    def _infer_shape(self, x: List[int]):
+        eval_func = self.shape_eval_template.render(
+            indent="",
+            dtype="",
+            div="//",
+            x_dim0=x[0],
+            x_dim1=x[1],
+            x_dim2=x[2],
+            x_dim3=x[3],
+        )
+        output = {}
+        exec(eval_func, output)  # noqa: P204
+        return [
+            int(output["NO"]),
+            int(output["HO"]),
+            int(output["WO"]),
+            int(output["CO"]),
+        ]
+
+    def _infer_shapes_v2(self, x: Tensor):
+        x_shape_values = [var._attrs["values"] for var in x._attrs["shape"]]
+        x_shapes = itertools.product(*x_shape_values)
+        # run infershape for each
+        y_shapes = []
+        for x_shape in x_shapes:
+            y_shape = self._infer_shape(x_shape)
+            y_shapes.append(y_shape)
+
+        def unique(vector):
+            return sorted(set(vector))
+
+        output_shape = [
+            x.shape()[0],
+            shape_utils.gen_int_var(unique([d[1] for d in y_shapes])),
+            shape_utils.gen_int_var(unique([d[2] for d in y_shapes])),
+            shape_utils.gen_int_var(unique([d[3] for d in y_shapes])),
+        ]
+
+        in_h = x._attrs["shape"][1]._attrs["symbolic_value"]
+        in_w = x._attrs["shape"][2]._attrs["symbolic_value"]
+        output_shape[1]._attrs["symbolic_value"] = in_h
+        output_shape[2]._attrs["symbolic_value"] = in_w
+        return output_shape
 
     def __call__(
         self,
@@ -129,7 +198,7 @@ class group_norm(Operator):
         self._sanity_check(x, gamma, beta)
         self._set_depth()
         output_shape = self._infer_shapes(x)
-        output = Tensor(output_shape, src_ops={self})
+        output = Tensor(output_shape, src_ops={self}, dtype=x.dtype())
 
         batch_size = output_shape[0]._attrs["values"][-1]
         self._attrs["workspace"] = 8 * batch_size * self._attrs["num_groups"]
@@ -240,7 +309,7 @@ class group_norm(Operator):
         )
         cache_value = target.query_profile_cache("normalization", query.__dict__)
         if cache_value is not None and not target.force_profile():
-            logger.info(__name__, "Load profiling result from cache.")
+            _LOGGER.info("Load profiling result from cache.")
             return cache_value
 
         content = list(self._attrs["op_instance"].keys())
@@ -255,7 +324,11 @@ class group_norm(Operator):
 
         if len(result) == 0:
             raise RuntimeError(
-                "Profile workload: " f"{exec_key}" " failed. " f"Results: {result}."
+                "Profile workload: "
+                f"{self._attrs['op']} "
+                f"{exec_key}"
+                " failed. "
+                f"Results: {result}."
             )
 
         out = min(result, key=lambda x: x[1].duration)
@@ -313,8 +386,7 @@ class group_norm(Operator):
             func(self._attrs)
 
         for wkl in workloads:
-            logger.info(
-                __name__,
+            _LOGGER.info(
                 "Profile: {name}: {wkl}".format(name=self._attrs["name"], wkl=wkl),
             )
             best_algo, workspace = self._profile_single_workload(
@@ -403,9 +475,6 @@ class group_norm(Operator):
                 algo="",
             )
             self._attrs["exec_path"][exec_item.profiling_key] = exec_item
-
-    def _inputs_for_pseudo_code(self):
-        return self._attrs["inputs"] + [f"num_groups={self._attrs['num_groups']}"]
 
     def _get_op_attributes(self):
         return {

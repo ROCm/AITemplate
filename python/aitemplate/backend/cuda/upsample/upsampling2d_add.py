@@ -16,9 +16,9 @@
 Codegen functions for upsampling2d_add.
 """
 
-from ... import registry
-from ...backend_spec import CUDASpec
-from ...common import upsampling2d_common
+from aitemplate.backend import registry
+from aitemplate.backend.backend_spec import CUDASpec
+from aitemplate.backend.common import upsampling2d_common
 
 # pylint: disable=C0103,C0415,W0613,C0301,W0612
 
@@ -34,7 +34,7 @@ Header_Files = """
 def gen_function(
     func_attrs,
     template_path,
-    exec_cond_remplate,
+    exec_cond_template,
     shape_eval_template,
     shape_save_template,
 ):
@@ -42,7 +42,7 @@ def gen_function(
     exec_path = func_attrs["exec_path"]
     x = func_attrs["inputs"][0]
     backend_spec = CUDASpec()
-    input_type = backend_spec.dtype_to_lib_type(x._attrs["dtype"])
+    input_type = backend_spec.dtype_to_backend_type(x._attrs["dtype"])
     half2_data_ref = backend_spec.half2_data_ref
 
     shape_eval_func = shape_eval_template.render(
@@ -67,7 +67,7 @@ def gen_function(
         program = upsampling2d_common.EXEC_TEMPLATE.render(
             bias_add=True, dtype=input_type
         )
-        exec_inst = exec_cond_remplate.render(indent="  ", cond=key, program=program)
+        exec_inst = exec_cond_template.render(indent="  ", cond=key, program=program)
         exec_paths += exec_inst
     return upsampling2d_common.SRC_TEMPLATE.render(
         header_files=Header_Files,
@@ -80,6 +80,7 @@ def gen_function(
         mode=func_attrs["mode"],
         bias_add=True,
         tsize=upsampling2d_common.gen_alignment(x),
+        dtype=input_type,
     )
 
 

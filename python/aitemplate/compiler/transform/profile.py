@@ -15,25 +15,29 @@
 """
 Graph pass to invoke profiling.
 """
+import logging
 import os
+from collections import OrderedDict
 from copy import deepcopy
 from datetime import datetime
-from typing import List, OrderedDict
+from typing import List
+
+from aitemplate.backend import builder, codegen
 
 from aitemplate.backend.profiler_runner import ProfilerRunner
 from aitemplate.backend.target import Target
+from aitemplate.compiler.base import DynamicProfileStrategy, Tensor
 
 from aitemplate.compiler.ops.gemm_universal.gemm_common import (
     gemm,
     GemmProfilerPostprocessingDelegate,
 )
-
-from aitemplate.utils import logger
-
-from ...backend import builder, codegen
-from ..base import DynamicProfileStrategy, Tensor
+from aitemplate.utils.environ import force_profiler_cache
 
 # pylint: disable=C0103,W0613,W0102
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def elapsed_dt_sec(start_t_sec):
@@ -53,8 +57,8 @@ def profile(
     workdir="./tmp",
     devices=None,
     dynamic_profiling_strategy=DynamicProfileStrategy.MAX,
+    timeout=500,
 ):
-
     """Profiles kernels.
 
     Parameters
@@ -76,26 +80,25 @@ def profile(
         devices = [0]
     profiler_dir = os.path.join(workdir)
     start_t = datetime.now()
+    _LOGGER.info(f"Force profiler cache = {force_profiler_cache()}")
     generated_profilers = list(
         codegen.gen_profiler(sorted_graph, profiler_dir, dynamic_profiling_strategy)
     )
     generated_profilers = [p for p in generated_profilers if p is not None]
-    logger.info(
-        __name__,
+    _LOGGER.info(
         f"generated {len(generated_profilers)} profilers elapsed time: {elapsed_dt_sec(start_t)}",
     )
     start_t = datetime.now()
-    compile_engine = builder.Builder()
+    compile_engine = builder.get_compile_engine()
     compile_engine.make_profilers(generated_profilers, profiler_dir)
-    logger.info(__name__, f"compiled profilers elapsed time: {elapsed_dt_sec(start_t)}")
+    _LOGGER.info(f"compiled profilers elapsed time: {elapsed_dt_sec(start_t)}")
     funcs_to_profile = OrderedDict(
-        {
-            func._attrs["name"]: func
-            for node in sorted_graph
-            for func in node.src_ops()
-            if func._attrs["has_profiler"]
-        }
+        (func._attrs["name"], func)
+        for node in sorted_graph
+        for func in node.src_ops()
+        if func._attrs["has_profiler"]
     )
+
     start_t = datetime.now()
     gemms, non_gemms = _splitter(
         funcs_to_profile.values(), lambda f: isinstance(f, gemm)
@@ -104,13 +107,12 @@ def profile(
         f.profile(
             workdir=profiler_dir,
             devices=devices,
-            dynamic_profiling_strategy=dynamic_profiling_strategy,
         )
-    timeout = 360 if Target.current().name() == "rocm" else 180
+    timeout = 2400 if Target.current().name() == "rocm" else 240
     profiler_runner = ProfilerRunner(
         devices,
-        timeout=timeout,
         postprocessing_delegate=GemmProfilerPostprocessingDelegate(),
+        timeout=timeout,
     )
     for f in gemms:
         f.profile(
@@ -118,8 +120,7 @@ def profile(
             profiler_runner=profiler_runner,
         )
     profiler_runner.join()
-    logger.info(
-        __name__,
+    _LOGGER.info(
         f"ran {len(funcs_to_profile)} profilers elapsed time: {elapsed_dt_sec(start_t)}",
     )
     for node in sorted_graph:

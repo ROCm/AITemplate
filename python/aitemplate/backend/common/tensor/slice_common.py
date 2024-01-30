@@ -239,10 +239,12 @@ slice_scatter_kernel(
 
 enum class LoadVecType {
   VT_HALF = 0,
+  VT_BFLOAT16 = 0,
   VT_FLOAT,
   VT_FLOAT2,
   VT_FLOAT4
 };
+
 
 template <typename ELEM_T>
 static inline LoadVecType get_vec_type(int64_t dim_size) {
@@ -259,7 +261,11 @@ static inline LoadVecType get_vec_type(int64_t dim_size) {
   HANDLE_ONE_VEC_TYPE(LoadVecType::VT_FLOAT4, float4)
   HANDLE_ONE_VEC_TYPE(LoadVecType::VT_FLOAT2, float2)
   HANDLE_ONE_VEC_TYPE(LoadVecType::VT_FLOAT, float)
-  HANDLE_ONE_VEC_TYPE(LoadVecType::VT_HALF, half)
+  if constexpr (std::is_same_v<ELEM_T, half>) {
+    HANDLE_ONE_VEC_TYPE(LoadVecType::VT_HALF, half)
+  } else if constexpr (std::is_same_v<ELEM_T, bfloat16>) {
+    HANDLE_ONE_VEC_TYPE(LoadVecType::VT_BFLOAT16, bfloat16)
+  }
 
 #undef HANDLE_ONE_VEC_TYPE
   throw std::runtime_error(
@@ -285,6 +291,11 @@ static LoadVecType get_input_vec_type(
       break;
     }
   }
+  // We have a full slice for the entire input
+  if (flatten_index == -1) {
+    flatten_index = 0;
+  }
+
   int64_t input_start_offset =
       compute_input_linear_index<Rank>(input_strides,
                                        slice_start_indices,
@@ -342,15 +353,36 @@ void prepare_one_meta_data(
 
   slice_meta_data.num_elems[input_idx] = 1;
   for ({{index_type}}  i = 0; i < Rank; i++) {
-    assert(slice_start_indices[i] >= 0 &&
-           slice_start_indices[i] <= input_shape[i]);
-    assert(slice_end_indices[i] >= 0 && slice_end_indices[i] <= input_shape[i]);
-    assert(slice_start_indices[i] <= slice_end_indices[i]);
+    int64_t slice_start_idx = slice_start_indices[i];
+    int64_t slice_end_idx = slice_end_indices[i];
+    int64_t input_dim = input_shape[i];
 
-    slice_meta_data.num_elems[input_idx] *=
-        slice_end_indices[i] - slice_start_indices[i];
-    slice_meta_data.slice_start_indices[input_idx][i] = slice_start_indices[i];
-    slice_meta_data.slice_end_indices[input_idx][i] = slice_end_indices[i];
+    if (!(slice_start_idx >= 0 && slice_start_idx <= input_dim)) {
+        throw std::runtime_error("invalid slice_start_idx: " +
+            std::to_string(slice_start_idx) +
+            ", input_dim: " +
+            std::to_string(input_dim) +
+            ", i: " + std::to_string(i));
+    }
+    if (!(slice_end_idx >= 0 && slice_end_idx <= input_dim)) {
+        throw std::runtime_error("invalid slice_end_idx: " +
+            std::to_string(slice_end_idx) +
+            ", input_dim: " +
+            std::to_string(input_dim) +
+            ", i: " + std::to_string(i));
+    }
+    if (slice_start_idx > slice_end_idx) {
+        throw std::runtime_error(
+            "expected slice_start_idx <= slice_end_idx but got slice_start_idx: " +
+            std::to_string(slice_start_idx) +
+            " and slice_end_idx: " +
+            std::to_string(slice_end_idx) +
+            ", i: " + std::to_string(i));
+    }
+
+    slice_meta_data.num_elems[input_idx] *= slice_end_idx - slice_start_idx;
+    slice_meta_data.slice_start_indices[input_idx][i] = slice_start_idx;
+    slice_meta_data.slice_end_indices[input_idx][i] = slice_end_idx;
   }
 
   slice_meta_data.dim_sizes[input_idx] =
@@ -363,6 +395,7 @@ template <typename ELEM_T, {{index_type}}  Rank, {{index_type}}  NumInputs,
           {{index_type}}  ElemsPerThread, {{index_type}}  ThreadsPerBlock>
 void slice_scatter_kernel_launcher(
     ELEM_T *output,
+    {{index_type}} output_offset,
     const int64_t *output_shape,
     const ELEM_T *inputs[],
     const int64_t *input_shapes[],
@@ -376,10 +409,20 @@ void slice_scatter_kernel_launcher(
 
   // meta data for placing sliced output
   scatter_meta_data.output_strides[Rank-1] = 1;
+  if (output_shape[Rank-1] < 0) {
+    throw std::runtime_error("invalid output_shape[Rank-1]: " +
+        std::to_string(output_shape[Rank-1]) +
+        ", Rank: " + std::to_string(Rank));
+  }
   scatter_meta_data.output_shape[Rank-1] = output_shape[Rank-1];
   for ({{index_type}}  i = Rank - 2; i >= 0; i--) {
     scatter_meta_data.output_strides[i] =
         scatter_meta_data.output_strides[i+1] * output_shape[i+1];
+    if (output_shape[i] < 0) {
+      throw std::runtime_error("invalid output_shape[i]: " +
+          std::to_string(output_shape[i]) +
+          ", i: " + std::to_string(i));
+    }
     scatter_meta_data.output_shape[i] = output_shape[i];
   }
 
@@ -394,7 +437,7 @@ void slice_scatter_kernel_launcher(
     scatter_dim_offset += slice_meta_data.dim_sizes[i];
   }
 
-  LoadVecType min_vec_type = LoadVecType::VT_FLOAT4;
+  LoadVecType min_vec_type = get_vec_type<ELEM_T>(output_offset);
   for ({{index_type}}  i = 0; i < NumInputs; i++) {
     LoadVecType vec_type = get_input_vec_type<ELEM_T, Rank>(
         scatter_meta_data.output_strides,
@@ -416,35 +459,41 @@ void slice_scatter_kernel_launcher(
     }
   }
 
+  if (max_num_elems <= 0) {
+    throw std::runtime_error("invalid max_num_elems: " +
+        std::to_string(max_num_elems));
+  }
+
   {{index_type}}  m = max_num_elems % (ThreadsPerBlock * ElemsPerThread) != 0;
   {{index_type}}  num_blocks_x =
       (max_num_elems / (ThreadsPerBlock * ElemsPerThread)) + m;
   dim3 grid_config = dim3(num_blocks_x, NumInputs);
 
 #define HANDLE_ONE_VEC_TYPE(load_vec_type, vec_type)                          \\
-    case load_vec_type: {                                                     \\
+    if (min_vec_type == load_vec_type) {                                      \\
       if (ElemsPerThread * sizeof(ELEM_T) < sizeof(vec_type)) {               \\
          throw std::runtime_error(                                            \\
            std::string("No valid kernel available for ") + #vec_type);        \\
       }                                                                       \\
       slice_scatter_kernel<vec_type, ELEM_T, Rank, NumInputs, ElemsPerThread> \\
         <<<grid_config, ThreadsPerBlock, 0, stream>>>(                        \\
-            output,                                                           \\
+            output + output_offset,                                           \\
             slice_meta_data,                                                  \\
             scatter_meta_data);                                               \\
       LAUNCH_CHECK_SLICE();                                                   \\
-      break;                                                                  \\
+      return;                                                                 \\
     }
 
-  switch (min_vec_type) {
     HANDLE_ONE_VEC_TYPE(LoadVecType::VT_FLOAT4, float4)
     HANDLE_ONE_VEC_TYPE(LoadVecType::VT_FLOAT2, float2)
     HANDLE_ONE_VEC_TYPE(LoadVecType::VT_FLOAT, float)
-    HANDLE_ONE_VEC_TYPE(LoadVecType::VT_HALF, half)
-    default:
-      throw std::runtime_error("Invalid LoadVecType\\n");
-  }
+    if constexpr (std::is_same_v<ELEM_T, half>) {
+      HANDLE_ONE_VEC_TYPE(LoadVecType::VT_HALF, half)
+    } else if constexpr (std::is_same_v<ELEM_T, bfloat16>) {
+      HANDLE_ONE_VEC_TYPE(LoadVecType::VT_BFLOAT16, bfloat16)
+    }
 
+  throw std::runtime_error("Invalid LoadVecType\\n");
 #undef HANDLE_ONE_VEC_TYPE
 }
 
@@ -457,6 +506,12 @@ normalize_slice_indices(
   std::vector<int64_t> slice_start_indices(rank);
   std::vector<int64_t> slice_end_indices(rank);
   for ({{index_type}}  i = 0; i < rank; i++) {
+    if (input_shape[i] < 0) {
+        throw std::runtime_error("invalid input_shape: " +
+            std::to_string(input_shape[i]) +
+            ", i: " +
+            std::to_string(i));
+    }
     slice_start_indices[i] = orig_slice_start_indices[i] < 0 ?
                              input_shape[i] + orig_slice_start_indices[i]:
                              orig_slice_start_indices[i];
@@ -509,7 +564,8 @@ EXEC_COND_TEMPLATE = jinja2.Template(
 {{indent}}                                {{num_inputs}}/*NumInputs*/,
 {{indent}}                                {{elems_per_thread}}/*ElemsPerThread*/,
 {{indent}}                                {{threads_per_block}}/*ThreadsPerBlock*/>(
-{{indent}}      static_cast<{{elem_type}}*>(output), local_output_shape, reinterpret_cast<const {{elem_type}}**>(inputs), input_shapes,
+{{indent}}      static_cast<{{elem_type}}*>(output), {{output_offset}}, local_output_shape,
+{{indent}}      reinterpret_cast<const {{elem_type}}**>(inputs), input_shapes,
 {{indent}}      slice_start_indices, slice_end_indices, scatter_dim, stream);
 {{indent}}  return;
 {{indent}}}
@@ -539,6 +595,9 @@ void {{func_name}}(
   }
   if (scatter_dim >= rank) {
     throw std::runtime_error("scatter_dim must < rank!");
+  }
+  if (num_inputs < 1) {
+    throw std::runtime_error("num_inputs must be larger than 0!");
   }
 
   // clip slip start and end indices
@@ -691,6 +750,7 @@ def gen_function(
     func_attrs,
     backend_spec,
     elems_per_thread=8,
+    output_offset=0,
     update_output_shape=True,
     element_func=None,
     element_func_def=None,
@@ -741,6 +801,7 @@ def gen_function(
         elem_type=input_type,
         elems_per_thread=elems_per_thread,
         threads_per_block=128,
+        output_offset=output_offset,
     )
 
     shape_func = SHAPE_UPDATE_FUNC.render(

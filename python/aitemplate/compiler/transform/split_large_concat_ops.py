@@ -22,14 +22,16 @@ import logging
 
 from typing import List
 
+from aitemplate.compiler import ops
+from aitemplate.compiler.base import Operator, Tensor
+
 from aitemplate.compiler.stable_set import StableSet
+from aitemplate.compiler.transform import transform_utils
 
-from ...utils import graph_utils
-from .. import ops
-from ..base import Operator, Tensor
-from . import transform_utils
+from aitemplate.utils import graph_utils
 
-logger = logging.getLogger(__name__)
+
+_LOGGER = logging.getLogger(__name__)
 
 CONCAT_INPUT_META_SIZE = 64
 CONCAT_OUTPUT_META_SIZE = 16
@@ -46,7 +48,7 @@ def _concat_kernel_single_input_output_param_size(op: Operator):
     size_of_one_output_meta = CONCAT_OUTPUT_META_SIZE * rank
     # There are 3 more params, where each takes 8 bytes, so we add 24 more bytes
     total_params_size = CONCAT_INPUT_META_SIZE + size_of_one_output_meta + 24
-    logger.debug(f'concat op op._attrs["name"]: {total_params_size=}')
+    _LOGGER.debug(f'concat op {op._attrs["name"]}: {total_params_size=}')
     return total_params_size
 
 
@@ -91,22 +93,21 @@ def split_large_concat_ops(sorted_graph: List[Tensor], _: str) -> List[Tensor]:
         concat_outputs = concat_op._attrs["outputs"]
         input_accessors = concat_op._attrs["input_accessors"]
         for new_inputs_size in split_sizes:
-            new_concat_output = ops.concatenate()(
-                concat_inputs, concat_op._attrs["concat_dim"]
-            )
-            new_concat_op = list(new_concat_output.src_ops())[0]
+            new_concat_op = ops.concatenate()
+            new_concat_op._attrs["inputs"] = list(concat_inputs)
+            new_concat_op._attrs["concat_dim"] = concat_op._attrs["concat_dim"]
             new_concat_op._attrs["outputs"] = concat_outputs.copy()
             new_concat_op._attrs["original_inputs"] = concat_op._attrs[
                 "original_inputs"
             ].copy()
             new_concat_op._attrs["input_masks"] = concat_op._attrs["input_masks"].copy()
             new_concat_op._attrs["input_accessors"] = copy.deepcopy(input_accessors)
+            new_concat_op._set_depth()
+
             indices_to_remove = list(range(offset)) + list(
                 range(offset + new_inputs_size, num_inputs)
             )
             new_concat_op.remove_input_at(indices_to_remove)
-            new_concat_output._attrs["src_ops"] = StableSet()
-            new_concat_output._attrs["dst_ops"] = StableSet()
             all_new_concat_ops.append(new_concat_op)
             offset += new_inputs_size
         # original inputs are distributed among new concats, so we need to adjust

@@ -20,8 +20,10 @@ from typing import Any, Dict
 
 import jinja2
 
-from ... import registry
-from ...target import Target
+from aitemplate.backend import registry
+
+from aitemplate.backend.backend_spec import CUDASpec
+from aitemplate.backend.target import Target
 
 FUNC_DECL_TEMPLATE = jinja2.Template(
     """
@@ -60,9 +62,12 @@ SRC_TEMPLATE = jinja2.Template(
 #include <limits>
 #include <stdexcept>
 #include <cuda_fp16.h>
+#include <cuda_bf16.h>
 #include "cutlass/arch/memory_sm80.h"
 #include "cutlass/cutlass.h"
 #include "logging.h"
+
+using bfloat16 = __nv_bfloat16;
 
 namespace {
 
@@ -86,8 +91,7 @@ void {{func_name}}(
 {% endfor %}
   *dim_{{input_rank - 1}}
     };
-
-    invokePermute<{{input_rank}}, {{elem_size}}>(dst, src, src_dims, permutation, stream);
+    invokePermute<{{input_rank}}, {{elem_type}}>(dst, src, src_dims, permutation, stream);
 }
 
   """
@@ -116,13 +120,18 @@ def gen_function(func_attrs: Dict[str, Any]) -> str:
         os.path.dirname(__file__), "permute.cuh"
     )
     dtype = x.dtype()
-    assert dtype == "float16", "permute kernel only supports fp16"
-    elem_size = 2
+    assert dtype in (
+        "float16",
+        "bfloat16",
+        "float32",
+        "float",
+    ), "permute is only tested for floating point type"
+    backend_type = CUDASpec().dtype_to_backend_dtype[dtype]
     return SRC_TEMPLATE.render(
         func_name=func_name,
         custom_libs=custom_libs,
         input_rank=rank,
-        elem_size=elem_size,
+        elem_type=backend_type,
     )
 
 

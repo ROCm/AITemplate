@@ -18,21 +18,22 @@ Check each transform function summary for specific pattern to be transformed.
 """
 from typing import Callable, List, Tuple, Type, Union
 
-from aitemplate.utils.shape_utils import is_singleton_dimension
-from ...backend.target import Target
+from aitemplate.backend.target import Target
 
-from .. import ops
-from ..base import Operator, Tensor
-from ..ops.gemm_special.gemm_rrr_small_nk import gemm_rrr_small_nk
-from ..ops.gemm_universal.bmm_rcr import bmm_rcr
-from ..ops.gemm_universal.gemm_rrr import gemm_rrr
-from .transform_utils import (
+from aitemplate.compiler import ops
+from aitemplate.compiler.base import Operator, Tensor
+from aitemplate.compiler.ops.gemm_special.gemm_rrr_small_nk import gemm_rrr_small_nk
+from aitemplate.compiler.ops.gemm_universal.bmm_xxx import bmm_rcr
+from aitemplate.compiler.ops.gemm_universal.gemm_rrr import gemm_rrr
+from aitemplate.compiler.transform.transform_utils import (
     copy_src_op_attributes,
     copy_tensor_attributes,
     remove_dst_op_from_tensor,
     replace_tensor,
     sanitize_sorted_graph,
 )
+
+from aitemplate.utils.shape_utils import is_singleton_dimension
 
 # pylint: disable=C0103,C0415,W0612
 
@@ -198,12 +199,11 @@ def _transform_1x1_conv_gemm_rcr(sorted_graph: List[Tensor]) -> List[Tensor]:
         if src_op._attrs["op"] not in conv_to_gemm:
             return False
 
-        if (
-            src_op._attrs["pad"] != 0
-            or src_op._attrs["dilate"] != 1
-            or src_op._attrs["group"] != 1
-            or src_op._attrs["stride"] != 1
-        ):
+        valid_pad = src_op._attrs["pad"] == 0 or src_op._attrs["pad"] == (0, 0)
+        valid_dilate = src_op._attrs["dilate"] == 1 or src_op._attrs["dilate"] == (1, 1)
+        valid_stride = src_op._attrs["stride"] == 1 or src_op._attrs["stride"] == (1, 1)
+        valid_group = src_op._attrs["group"] == 1
+        if not valid_pad or not valid_dilate or not valid_stride or not valid_group:
             return False
 
         # Check that the filter is 1x1
@@ -297,8 +297,8 @@ def transform_special_ops(
         _transform_1x1_conv_gemm_rcr,
     ]
 
-    if "transform_conv_to_gemm" in Target.current()._kwargs:
-        if Target.current()._kwargs["transform_conv_to_gemm"]:
+    if "convert_conv_to_gemm" in Target.current()._kwargs:
+        if Target.current()._kwargs["convert_conv_to_gemm"]:
             for func in funcs:
                 sorted_graph = func(sorted_graph)
     return sorted_graph

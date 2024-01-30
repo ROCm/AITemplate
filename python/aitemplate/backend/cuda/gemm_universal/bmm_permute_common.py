@@ -15,11 +15,15 @@
 """
 Common functions and templates for bmm_permute-family ops
 """
-from ...backend_spec import CUDASpec
-from ...common import gemm_common
-from ..gemm_universal import common, common_bias
+from aitemplate.backend.backend_spec import CUDASpec
+from aitemplate.backend.common import gemm_common
 
-from . import bmm_common, common_permute
+from aitemplate.backend.cuda.gemm_universal import (
+    bmm_common,
+    common,
+    common_bias,
+    common_permute,
+)
 
 # pylint: disable=C0103,C0415,W0613,C0301,R1705,R1703
 
@@ -94,13 +98,6 @@ def gen_profiler(
             gemm_op=gemm_op,
             gemm_op_name=op_name,
             func_name=f"benchmark_{function_name}",
-            a_ptr="memory_pool->RequestTensorByIdx(0)",
-            b_ptr="memory_pool->RequestTensorByIdx(1)",
-            has_bias=has_bias,
-            bias_ptr=bias_ptr_arg,
-            c_ptr="memory_pool->RequestTensorByIdx(2)",
-            d_ptr="memory_pool->RequestTensorByIdx(%d)" % (4 if has_bias else 3),
-            has_d=has_d,
             adims=a_dims_ptr,
             bdims=b_dims_ptr,
             cdims=c_dims_ptr,
@@ -126,12 +123,12 @@ def gen_profiler(
     func_call = bmm_common.FUNC_CALL_TEMPLATE.render(
         is_profiler=True,
         func_name=function_name,
-        a_ptr="a_ptr",
-        b_ptr="b_ptr",
+        a_ptr="memory_pool->RequestTensorByIdx(0)",
+        b_ptr="memory_pool->RequestTensorByIdx(1)",
         has_bias=has_bias,
         bias_ptr=bias_ptr_arg,
-        c_ptr="c_ptr",
-        d_ptr="d_ptr",
+        c_ptr="memory_pool->RequestTensorByIdx(2)",
+        d_ptr="memory_pool->RequestTensorByIdx(%d)" % (4 if has_bias else 3),
         has_d=has_d,
         a_dims_ptr=benchmark_adims,
         b_dims_ptr=benchmark_bdims,

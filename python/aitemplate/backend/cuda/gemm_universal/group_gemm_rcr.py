@@ -17,32 +17,32 @@ Codegen functions for group_gemm_rcr.
 """
 import jinja2
 
-from ... import registry
-from . import common, group_common
-from .layout import RCR
+from aitemplate.backend import registry
+from aitemplate.backend.cuda.gemm_universal import common, group_common
+from aitemplate.backend.cuda.gemm_universal.layout import RCR
 
 # pylint: disable=C0103,C0415,W0613,C0301,R1705,R1703
 
 PROBLEM_ARGS_TEMPLATE = jinja2.Template(
     """
-        problem_sizes_device,
-        problem_count,
-        threadblock_count,
-        {ElementComputeEpilogue(1), ElementComputeEpilogue(0)},
-        ({{elem_input_type}}**)(ptr_A),
-        ({{elem_input_type}}**)(ptr_B),
-        ({{elem_output_type}}**)(ptr_C),
-        ({{elem_output_type}}**)(ptr_C),
-        lda,
-        ldb,
-        ldc,
-        ldc
+    problem_sizes_device,                                    // GemmCoord *problem_sizes
+    problem_count,                                           // int problem_count
+    threadblock_count,                                       // int threadblock_count
+    {ElementComputeEpilogue(1), ElementComputeEpilogue(0)},  // typename EpilogueOutputOp::Params output_op
+    ({{elem_input_type}}**)(ptr_A),                          // ElementA ** ptr_A
+    ({{elem_input_type}}**)(ptr_B),                          // ElementB ** ptr_B
+    ({{elem_output_type}}**)(ptr_C),                         // ElementC ** ptr_C
+    ({{elem_output_type}}**)(ptr_C),                         // ElementC ** ptr_D
+    lda,                                                     // typename LayoutA::Stride::LongIndex *lda
+    ldb,                                                     // typename LayoutB::Stride::LongIndex *ldb
+    ldc,                                                     // typename LayoutC::Stride::LongIndex *ldc
+    ldc,                                                     // typename LayoutC::Stride::LongIndex *ldd
 """
 )
 
 
 @registry.reg("cuda.group_gemm_rcr.config")
-def group_rcr_config(func_attrs, dtype="float16"):
+def group_rcr_config(func_attrs):
     common.make_fproc(func_attrs, RCR)
 
 

@@ -15,10 +15,10 @@
 """
 Frontend for attention module
 """
-from ...compiler import ops
-from .linear import Linear
-from .module import Module
-from .parameter import Parameter
+from aitemplate.compiler import ops
+from aitemplate.frontend.nn.linear import Linear
+from aitemplate.frontend.nn.module import Module
+from aitemplate.frontend.nn.parameter import Parameter
 
 # pylint: disable=C0103
 
@@ -33,7 +33,7 @@ class DualGemm(Module):
         fast_gelu=True,
         dtype="float16",
     ):
-        """Initilize dual gemm module, create a tensor for weights"""
+        """Initialize dual gemm module, create a tensor for weights"""
         super().__init__()
         self.w1 = Parameter(shape=[out_channels, in_channels], dtype=dtype)
         self.w2 = Parameter(shape=[out_channels, in_channels], dtype=dtype)
@@ -59,9 +59,20 @@ class T5DenseGatedGeluDense(Module):
         dtype="float16",
     ):
         super().__init__()
-        self.wi_0_weight = Parameter(shape=[out_channels, in_channels], dtype=dtype)
-        self.wi_1_weight = Parameter(shape=[out_channels, in_channels], dtype=dtype)
-        self.wo = Linear(out_channels, in_channels, bias=False)
+        self.wi_0_weight = Parameter(
+            shape=[out_channels, in_channels],
+            dtype=dtype,
+        )
+        self.wi_1_weight = Parameter(
+            shape=[out_channels, in_channels],
+            dtype=dtype,
+        )
+        self.wo = Linear(
+            out_channels,
+            in_channels,
+            bias=False,
+            dtype=dtype,
+        )
         self.op = ops.dual_gemm_rcr_fast_gelu()
 
     def forward(self, *args):

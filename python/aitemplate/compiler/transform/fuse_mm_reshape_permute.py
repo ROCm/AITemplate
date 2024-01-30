@@ -17,11 +17,13 @@ Fuse GEMM + reshape + permute0213
 """
 from typing import List, Sequence
 
-from ...utils import graph_utils
-from ..base import IntImm, Operator, Tensor
-from ..ops import gemm_rcr_permute
-from . import transform_utils
-from .toposort import toposort
+from aitemplate.compiler.base import IntImm, Operator, Tensor
+from aitemplate.compiler.ops import gemm_rcr_permute
+from aitemplate.compiler.transform import transform_utils
+from aitemplate.compiler.transform.toposort import toposort
+from aitemplate.testing import detect_target
+
+from aitemplate.utils import graph_utils
 
 
 def _check_reshape(op: Operator) -> bool:
@@ -134,7 +136,7 @@ def _fuse_gemm_reshape_permute0213(
 
         permute_op = list(reshape_output.dst_ops())[0]
 
-        if permute_op._attrs["op"] != "permute":
+        if permute_op._attrs["op"] not in ("permute", "permute0213"):
             continue
 
         permute_output = permute_op._attrs["outputs"][0]
@@ -143,14 +145,19 @@ def _fuse_gemm_reshape_permute0213(
         if not _check_reshape(reshape_op):
             continue
 
-        if not _check_permute(permute_op, [0, 2, 1, 3]):
+        # check permute dims match [0, 2, 1, 3]: either
+        # permute0213 or generic permute with those dims
+        if permute_op._attrs["op"] != "permute0213" and not _check_permute(
+            permute_op, [0, 2, 1, 3]
+        ):
             continue
 
         # fuse ops together
         _, d1, d2, _ = reshape_output.shape()
         d1_v = d1.value()
         d2_v = d2.value()
-        gemm_permute_op = gemm_rcr_permute(shape=(d1_v, d2_v), layout="0213")
+        layout = "20314" if detect_target().name() == "cuda" else "m2n3"
+        gemm_permute_op = gemm_rcr_permute(shape=(d1_v, d2_v), layout=layout)
         a, b = op._attrs["inputs"]
         transform_utils.remove_dst_op_from_tensor(a, op)
         transform_utils.remove_dst_op_from_tensor(b, op)
@@ -180,10 +187,13 @@ def fuse_mm_reshape_permute(
     Returns:
         List[Tensor]: optimized graph
     """
+    if detect_target().name() == "cuda":
+        funcs = [
+            _fuse_gemm_reshape_permute0213,
+        ]
+    else:
+        funcs = []
 
-    funcs = [
-        _fuse_gemm_reshape_permute0213,
-    ]
     for func in funcs:
         sorted_graph = func(sorted_graph)
     return sorted_graph

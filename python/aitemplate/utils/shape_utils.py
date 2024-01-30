@@ -16,10 +16,16 @@
 Util functions to handle shapes.
 """
 
-from typing import List
+from typing import List, Optional
+
+import sympy
+
+from aitemplate.compiler.base import IntVar, IntVarTensor, Tensor
 
 
-def gen_int_var(values: List[int], name: str = None):
+def gen_int_var(
+    values: List[int], name: str = None, symbolic_value: Optional[sympy.Basic] = None
+):
     """
     A helper function to generate IntImm or IntVar depending on the length of values.
     """
@@ -29,17 +35,21 @@ def gen_int_var(values: List[int], name: str = None):
     if len(values) == 1:
         return IntImm(values[0], name=name)
     elif len(values) > 1:
-        return IntVar(values, name=name)
+        return IntVar(values, name=name, symbolic_value=symbolic_value)
     else:
         raise RuntimeError("Unsupported dim definition: {}".format(values))
 
 
-def gen_int_var_min_max(values: List[int], name: str = None):
+def gen_int_var_min_max(
+    values: List[int], name: str = None, symbolic_value: Optional[sympy.Basic] = None
+):
     """
     A helper function to generate IntImm or IntVar depending on the length of values.
     Only keeps [min, max] pairs if there are more than 2 values.
     """
-    return gen_int_var([min(values), max(values)], name=name)
+    return gen_int_var(
+        [min(values), max(values)], name=name, symbolic_value=symbolic_value
+    )
 
 
 def get_broadcast_max_shape(shape1, shape2):
@@ -99,7 +109,7 @@ def get_num_rightmost_static_elements(shape, num_rightmost_dims: int = None) -> 
     res = 1
 
     for idx, dim in enumerate(reversed(shape)):
-        if idx >= num_rightmost_dims:
+        if num_rightmost_dims is not None and idx >= num_rightmost_dims:
             break
         if not isinstance(dim, IntImm):
             break
@@ -147,6 +157,30 @@ def convert_shape_to_IntVar(shape):
     return ret
 
 
+def convert_shape_to_IntVarTensor(tensor: Tensor):
+    """
+    Map IntVars in the tensor's shape to their corresponding IntVarTensors, if any.
+    """
+    shape = tensor._attrs["shape"]
+    if not any(isinstance(v, IntVar) for v in shape):
+        return shape
+
+    intvar_to_tensor = {}
+    for op in tensor.src_ops():
+        for t in op._attrs["inputs"]:
+            if isinstance(t, IntVarTensor):
+                intvar_to_tensor[t._attrs["int_var"]] = t
+
+    ret = []
+    for v in shape:
+        # Using type() instead of isinstance() because we don't want to include IntImms
+        if type(v) is IntVar:
+            ret.append(intvar_to_tensor.get(v, v))
+        else:
+            ret.append(v)
+    return ret
+
+
 def convert_IntVar_to_int(var) -> int:
     """
     Try to convert an IntVar (or an IntVar wrapped in a IntVarTensor) to
@@ -185,3 +219,18 @@ def is_same_shape(shapes1, shapes2) -> bool:
         if dim1 != dim2:
             return False
     return True
+
+
+def get_static_stride(shape, dim) -> Optional[int]:
+    """
+    This is a helper function that returns the static stride for dim.
+    It returns None if it cannot generate a static stride.
+    """
+    from aitemplate.compiler.base import IntImm
+
+    stride = 1
+    for d in shape[dim + 1 :]:
+        if not isinstance(d, IntImm):
+            return None
+        stride *= d.value()
+    return stride

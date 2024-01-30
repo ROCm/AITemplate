@@ -17,14 +17,14 @@ ROCM codegen functions for conv2d_bias_sigmoid.
 """
 import jinja2
 
-from ... import registry
-from . import common
+from aitemplate.backend import registry
+from aitemplate.backend.rocm.conv2d import common
 
 # pylint: disable=C0103,C0415,W0613
 
 EXTRA_CODE = jinja2.Template(
     """
-#include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_fwd_multiple_d_xdl_cshuffle.hpp"
+#include "ck/tensor_operation/gpu/device/impl/device_grouped_conv_fwd_multiple_abd_xdl_cshuffle.hpp"
 
 #include "ck/utility/data_type.hpp"
 
@@ -35,7 +35,7 @@ namespace {
 struct AddSigmoid
 {
     template <typename T>
-    __host__ __device__ constexpr void operator()(T& y, const T& x0, const T& x1) const;\    
+    __host__ __device__ constexpr void operator()(T& y, const T& x0, const T& x1) const;   
     template <>
     __host__ __device__ constexpr void
     operator()<float>(float& y, const float& x0, const float& x1) const
@@ -116,7 +116,7 @@ def conv2d_gen_profiler(func_attrs, workdir, shape_template):
 @registry.reg("rocm.conv2d_bias_sigmoid.gen_function")
 def conv2d_gen_function(
     func_attrs,
-    exec_cond_remplate,
+    exec_cond_template,
     shape_eval_template,
     shape_save_template,
 ):
@@ -126,7 +126,7 @@ def conv2d_gen_function(
     ----------
     func_attrs : Dict
         Operation attributes.
-    exec_cond_remplate : jinja2.Template
+    exec_cond_template : jinja2.Template
         Generates if statement to execute kernel.
     shape_eval_template : jinja2.Template
         Generates shape calculation.
@@ -142,7 +142,7 @@ def conv2d_gen_function(
     """
     return common.gen_function(
         func_attrs,
-        exec_cond_remplate,
+        exec_cond_template,
         shape_eval_template,
         shape_save_template,
         "bias_sigmoid",

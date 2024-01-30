@@ -18,17 +18,45 @@ argmax kernel codegen for CUDA.
 
 from typing import Any, Dict
 
-from ... import registry
-from ...backend_spec import CUDASpec
-from ...common.tensor import argmax_common
+from aitemplate.backend import registry
+from aitemplate.backend.backend_spec import CUDASpec
+from aitemplate.backend.common.tensor import argmax_common
 
 # pylint: disable=C0301
 
 header_files = """
 #include <cuda_fp16.h>
+#include <cuda_bf16.h>
 #include "cutlass/cutlass.h"
 #include "cutlass/fast_math.h"
 #include <cub/cub.cuh>
+
+using bfloat16 = nv_bfloat16;
+// if this #if statement does not evaluate to True, it is already
+// defined in cub's util_type.cuh and would be a redefinition
+#if (__CUDACC_VER_MAJOR__ < 11 && CUDA_VERSION < 11000) || _NVHPC_CUDA
+namespace cub {
+    template <>
+    struct FpLimits<bfloat16>
+    {
+        static __host__ __device__ __forceinline__ bfloat16 Max() {
+            unsigned short max_word = 0x7F7F;
+            return reinterpret_cast<bfloat16&>(max_word);
+        }
+
+        static __host__ __device__ __forceinline__ bfloat16 Lowest() {
+            unsigned short lowest_word = 0xFF7F;
+            return reinterpret_cast<bfloat16&>(lowest_word);
+        }
+    };
+
+    template <> struct NumericTraits<bfloat16>
+      : BaseTraits<FLOATING_POINT, true, false, unsigned short, bfloat16> {};
+
+    template<> struct Traits<bfloat16>
+      : NumericTraits<bfloat16> {};
+}
+#endif
 """
 
 

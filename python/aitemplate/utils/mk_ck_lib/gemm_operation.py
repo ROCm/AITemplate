@@ -20,7 +20,7 @@ from typing import List
 
 import jinja2
 
-from . import library
+from aitemplate.utils.mk_ck_lib import library
 
 # import library
 
@@ -302,6 +302,8 @@ class GemmOperation:
     ds_dtype: List[library.DataType] = None
     ds_layout: List[library.LayoutType] = None
     e_dtype: library.DataType = None
+    loop_scheduler: str = ""
+    pipeline: str = ""
 
     def __str__(self) -> str:
         io_name = "{gemm_kind}_{gemm_specialization}_{a_dtype}{b_dtype}{c_dtype}_{a_layout}{b_layout}{c_layout}".format(
@@ -325,11 +327,13 @@ class GemmOperation:
         extra_name = (
             "_CM" if library.ShortTensorOperationNames[self.extra_kind] == "CM" else ""
         )
-        return "{io_name}_{tile_name}_{epilogue_functor}".format(
+        return "{io_name}_{tile_name}_{epilogue_functor}_{scheduler}_{pipeline}".format(
             io_name=io_name,
             tile_name=tile_name,
             epilogue_functor=library.ShortTensorOperationNames[self.epilogue_functor]
             + extra_name,
+            scheduler=library.ShortSchedulerNames.get(self.loop_scheduler, "default"),
+            pipeline=library.ShortPipelineNames.get(self.pipeline, "v1"),
         )
 
     def accumulator_type(self):
@@ -470,6 +474,12 @@ using {{name}} = {{xdl_op_type}}<
     7, // src_dst_vector_dim
     1 // dst_scalar_per_vector
 {% endif %}
+{% if LoopScheduler %}
+    ,{{LoopScheduler}}
+{% endif %}
+{% if Pipeline %}
+    ,{{Pipeline}}
+{% endif %}
     >;
 """
         )
@@ -513,6 +523,8 @@ using {{name}} = {{xdl_op_type}}<
             EDType=library.DataTypeTag[self.e_dtype]
             if self.e_dtype is not None
             else "",
+            LoopScheduler=self.loop_scheduler,
+            Pipeline=self.pipeline
         )
 
 

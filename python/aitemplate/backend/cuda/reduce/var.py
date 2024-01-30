@@ -21,9 +21,10 @@ https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_onli
 
 import jinja2
 
-from ... import registry
-from ...backend_spec import CUDASpec
-from . import reduce_3d
+from aitemplate.backend import registry
+from aitemplate.backend.backend_spec import CUDASpec
+from aitemplate.backend.cuda.reduce import reduce_3d
+from aitemplate.backend.target import Target
 
 
 EXTRA_CODE_TEMPLATE = jinja2.Template(
@@ -66,7 +67,7 @@ struct WelfordData {
       int new_count = new_data.count + count;
       ElementT nb_over_n = ElementT(new_data.count) / ElementT(new_count);
       mean = mean + delta * nb_over_n;
-      m2 =  m2 + new_data.m2 + delta * delta * count * nb_over_n;
+      m2 =  m2 + new_data.m2 + delta * delta * nb_over_n * ElementT(count);
       return WelfordData(new_count, mean, m2);
     }
 
@@ -112,20 +113,53 @@ void shared_load<32>(void *dst, uint32_t ptr) {
     : "r"(ptr));
 }
 
+template <>
+CUTLASS_DEVICE
+void shared_load<48>(void *dst, uint32_t ptr) {
+  uint4 *dst_u128 = reinterpret_cast<uint4 *>(dst);
+  asm volatile("ld.shared.v4.u32 {{ '{%0, %1, %2, %3}, [%4]' }};\\n"
+    :
+      "=r"(dst_u128->x),
+      "=r"(dst_u128->y),
+      "=r"(dst_u128->z),
+      "=r"(dst_u128->w)
+    : "r"(ptr));
+
+  dst_u128++;
+  ptr = ptr + sizeof(uint4);
+  asm volatile("ld.shared.v4.u32 {{ '{%0, %1, %2, %3}, [%4]' }};\\n"
+    :
+      "=r"(dst_u128->x),
+      "=r"(dst_u128->y),
+      "=r"(dst_u128->z),
+      "=r"(dst_u128->w)
+    : "r"(ptr));
+
+  dst_u128++;
+  ptr = ptr + sizeof(uint4);
+  asm volatile("ld.shared.v4.u32 {{ '{%0, %1, %2, %3}, [%4]' }};\\n"
+    :
+      "=r"(dst_u128->x),
+      "=r"(dst_u128->y),
+      "=r"(dst_u128->z),
+      "=r"(dst_u128->w)
+    : "r"(ptr));
+}
+
 } // namespace arch
 
 template <typename ElementT, bool BesselCorrection>
-struct NumericConverter<WelfordData<ElementT, BesselCorrection>,
+struct NumericConverter<WelfordData<{{acc_type}}, BesselCorrection>,
                         ElementT,
                         FloatRoundStyle::round_to_nearest> {
 
-  using result_type = WelfordData<ElementT, BesselCorrection>;
+  using result_type = WelfordData<{{acc_type}}, BesselCorrection>;
   using source_type = ElementT;
   static FloatRoundStyle const round_style = FloatRoundStyle::round_to_nearest;
 
   CUTLASS_HOST_DEVICE
   static result_type convert(source_type const & s) {
-    return WelfordData<ElementT, BesselCorrection>(-1, s, ElementT(0));
+    return WelfordData<{{acc_type}}, BesselCorrection>(-1, static_cast<{{acc_type}}>(s), {{acc_type}}(0));
   }
 
   CUTLASS_HOST_DEVICE
@@ -136,11 +170,11 @@ struct NumericConverter<WelfordData<ElementT, BesselCorrection>,
 
 template <typename ElementT, bool BesselCorrection>
 struct NumericConverter<ElementT,
-                        WelfordData<ElementT, BesselCorrection>,
+                        WelfordData<{{acc_type}}, BesselCorrection>,
                         FloatRoundStyle::round_to_nearest> {
 
   using result_type = ElementT;
-  using source_type = WelfordData<ElementT, BesselCorrection>;
+  using source_type = WelfordData<{{acc_type}}, BesselCorrection>;
   static FloatRoundStyle const round_style = FloatRoundStyle::round_to_nearest;
 
   CUTLASS_HOST_DEVICE
@@ -150,14 +184,14 @@ struct NumericConverter<ElementT,
       if (s.count <= 1) {
         return ElementT(nanf("Not a Number"));
       } else {
-        return s.m2 / ElementT((int)(s.count - 1));
+        return ElementT(s.m2) / ElementT((int)(s.count - 1));
       }
     } else {
       // sample variance
       if (s.count <= 0) {
         return ElementT(nanf("Not a Number"));
       } else {
-        return s.m2 / ElementT((int)(s.count));
+        return ElementT(s.m2) / ElementT((int)(s.count));
       }
     }
   }
@@ -261,17 +295,20 @@ def var_gen_function(func_attrs) -> str:
     """
     bessel = "true" if func_attrs["unbiased"] else "false"
     backend_spec = CUDASpec()
-    elem_input_type = backend_spec.dtype_to_lib_type(
-        func_attrs["inputs"][0]._attrs["dtype"]
-    )
-    acc_type = f"WelfordData<{elem_input_type}, {bessel}>"
+    output_type = func_attrs["outputs"][0]._attrs["dtype"]
+    elem_output_type = backend_spec.dtype_to_lib_type(output_type)
+
+    acc_type = "float"
+    if Target.current()._kwargs.get("use_fp16_acc", False) and output_type == "float16":
+        acc_type = elem_output_type
+    welford_type = f"WelfordData<{acc_type}, {bessel}>"
     return reduce_3d.gen_function(
         func_attrs,
         "cutlass::welford_op",
         reduce_3d.DEFAULT_PROLOGUE_TEMPLATE,
         reduce_3d.DEFAULT_EPILOGUE_SCALAR_TEMPLATE,
-        EXTRA_CODE_TEMPLATE.render(),
-        accumulation_type=acc_type,
+        EXTRA_CODE_TEMPLATE.render(acc_type=acc_type),
+        accumulation_type=welford_type,
     )
 
 

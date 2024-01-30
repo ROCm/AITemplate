@@ -16,9 +16,9 @@
 permute102 for rocm
 """
 
-from ... import registry
-from ...backend_spec import ROCMSpec
-from ...common.tensor import permute102_common
+from aitemplate.backend import registry
+from aitemplate.backend.backend_spec import ROCMSpec
+from aitemplate.backend.common.tensor import permute102_common
 
 # pylint: disable=C0301,W0613,W0612
 
@@ -30,7 +30,7 @@ Header_files = """
 
 
 @registry.reg("rocm.permute102.gen_function")
-def gen_function(func_attrs, template_path, shape_eval_template, shape_save_template):
+def gen_function(func_attrs, template_path):
     """
     Parameters
     ----------
@@ -38,8 +38,6 @@ def gen_function(func_attrs, template_path, shape_eval_template, shape_save_temp
         Attributes from Operator
     template_path : str
         path to library used
-    shape_eval_template : jinja template
-    shape_save_template : jinja template
 
     Returns
     -------
@@ -49,8 +47,6 @@ def gen_function(func_attrs, template_path, shape_eval_template, shape_save_temp
     return permute102_common.gen_function(
         func_attrs,
         template_path,
-        shape_eval_template,
-        shape_save_template,
         Header_files,
         ROCMSpec(),
     )

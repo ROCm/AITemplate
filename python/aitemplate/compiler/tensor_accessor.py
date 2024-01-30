@@ -22,16 +22,15 @@ import logging
 # pylint: disable=C0103,C0301,W0612
 
 from pprint import pformat
-from typing import Any, List, Optional
+from typing import Any, Iterable, List, Optional
 
-from aitemplate.compiler.base import IntVar
-
-from .base import IntImm, Tensor
-
-logger = logging.getLogger(__name__)
+from aitemplate.compiler.base import IntImm, IntVar, Tensor
 
 
-class TensorAccessor(object):
+_LOGGER = logging.getLogger(__name__)
+
+
+class TensorAccessor:
     """
     A tensor accessor which manages how to access a Tensor.
     Must always be used together with a Tensor.
@@ -45,10 +44,12 @@ class TensorAccessor(object):
         # Tensor offset in terms of number of elements compared to the base tensor.
         self.offset = 0
         self.original_shapes = original_tensor._attrs["shape"]
+        # We need dtype for computing alignment requirement
+        self.tensor_dtype = original_tensor.dtype()
         # This strictly means that the tensor's memory itself is contiguous
         self.is_contiguous = True
 
-        ## These variables are only set when self.stride_dim != None.
+        # These variables are only set when self.stride_dim != None.
         # A tensor can be contiguous and still come from a strided tensor,
         # e.g., when stride_dim == 0
         self.is_from_strided_tensor = False
@@ -78,7 +79,7 @@ class TensorAccessor(object):
         # between self.original_shapes and self.actual_shapes.
         # e.g. The original tensor is in shape [2, 3, 2], and it's reshaped to [2, 6].
         # In this case, self._dim_mapping = [([0], [0]), ([1, 2], [1])], which represents
-        # that self.orignal_shapes[0] and self.actual_shapes[0] are in the same group,
+        # that self.original_shapes[0] and self.actual_shapes[0] are in the same group,
         # and self.original_shapes[1:2] and self.actual_shapes[1] are in the same group.
         #
         # It's possible that such a mapping cannot be calculated (e.g. because of
@@ -204,7 +205,7 @@ class TensorAccessor(object):
             or original_idx != len(original_shapes)
             or actual_idx != len(actual_shapes)
         ):
-            logger.debug(f"tail processing failed, dim_mapping: {dim_mapping}")
+            _LOGGER.debug(f"tail processing failed, dim_mapping: {dim_mapping}")
             return
 
         # Remove the last dummy group.
@@ -212,7 +213,7 @@ class TensorAccessor(object):
 
         # Assign new dim_mapping to self._dim_mapping.
         self._dim_mapping = dim_mapping
-        logger.debug(f"generate dim_mapping: {dim_mapping}")
+        _LOGGER.debug(f"generate dim_mapping: {dim_mapping}")
 
     def try_get_stride_strs(
         self, dim: int, dim_names: List[str] = None
@@ -234,7 +235,9 @@ class TensorAccessor(object):
                 f"dim_names: {dim_names}, shapes: {self.original_shapes}"
             )
 
-        def _get_value_or_names(shape: List[IntVar], indices: List[int]) -> List[str]:
+        def _get_value_or_names(
+            shape: List[IntVar], indices: Iterable[int]
+        ) -> List[str]:
             res = []
             for index in indices:
                 d = shape[index]
@@ -255,13 +258,13 @@ class TensorAccessor(object):
         if self._dim_mapping is None:
             # self._dim_mapping cannot be generated successfully.
             # Return None to represent an error.
-            logger.debug("Failed to get dim mapping.")
+            _LOGGER.debug("Failed to get dim mapping.")
             return None
 
         # Loop through self._dim_mapping to generate stride_strs.
         found_original_dim_group = False
         res = []
-        for (original_group, actual_group) in self._dim_mapping:
+        for original_group, actual_group in self._dim_mapping:
             if not found_original_dim_group:
                 if dim in original_group:
                     found_original_dim_group = True
@@ -273,7 +276,7 @@ class TensorAccessor(object):
                         # need to make sure that dim is the last dim
                         # inside the original group.
                         # Otherwise, we cannot compute strides.
-                        logger.debug(
+                        _LOGGER.debug(
                             "Multiple dims in stride_dim group. "
                             f"dim_mapping: {self._dim_mapping}, "
                             f"dim: {dim}, stride_dim: {self.stride_dim}, self: {self}"
@@ -287,7 +290,7 @@ class TensorAccessor(object):
             else:
                 if self.stride_dim in actual_group:
                     if actual_group.index(self.stride_dim) != 0:
-                        logger.debug(
+                        _LOGGER.debug(
                             f"Stride dim {self.stride_dim} is not the first dim "
                             f"of the underlying group {actual_group}."
                         )
@@ -298,7 +301,7 @@ class TensorAccessor(object):
                         _get_value_or_names(self.original_shapes, original_group)
                     )
 
-        logger.debug(
+        _LOGGER.debug(
             f"dim: {dim}, stride_dim: {self.stride_dim}, "
             f"mapping: {self._dim_mapping}, stride_strs: {res}, "
             f"original: {self.original_shapes}, actual: {self.actual_shapes}"
@@ -328,7 +331,7 @@ class TensorAccessor(object):
             stride *= int(s)
         return stride
 
-    def gen_stride_str(self, dim: int, dim_names: List[str]) -> int:
+    def gen_stride_str(self, dim: int, dim_names: List[str]) -> str:
         """
         Returns the str to calculate the stride of a certain dim. This is
         a temporary solution to get around dynamic shapes problems with
@@ -350,7 +353,7 @@ class TensorAccessor(object):
         """
         Updates the TensorAccessor with a new base tensor.
         This API is useful to handle ops with a stride dim, e.g. split, cat.
-        It can also used by slice if slice is only operated on one dim.
+        It can also be used by slice if slice is only operated on one dim.
         """
 
         assert (
@@ -445,3 +448,33 @@ class TensorAccessor(object):
             f"actual tensor: {self.actual_shapes}!"
         )
         self._try_gen_dim_mapping()
+
+    def is_rightmost_dim_contiguous(self, cat_dim: int) -> bool:
+        """Check if the rightmost diminsion would be contiguous after
+        concatenation along a given cat_dim. This is a necessary condition for
+        GEMM+concat fusion, since GEMM doesn't support discontinuous rightmost
+        dimension for row-major outout. Rightmost diminsion is contiguous iff
+        the concat dimension corresponds to one of the dimensions in the
+        original shape and it's the first dimension in its group of actual
+        dimensions.
+        """
+        num_groups = len(self._dim_mapping)
+        for group_idx in range(num_groups):
+            original_group, actual_group = self._dim_mapping[group_idx]
+            if cat_dim in actual_group:
+                if actual_group.index(cat_dim):
+                    # Concat dimension isn't the first in its group
+                    return False
+                # Check that there is at least one non-empty original group to the
+                # right of the group where cat_dim found (inclusive)
+                while (group_idx < num_groups) and not len(
+                    self._dim_mapping[group_idx][0]
+                ):
+                    group_idx += 1
+                if group_idx >= num_groups:
+                    # There are no original dimensions to the right (inclusive) of concat
+                    # dimension. Concat dimension is an unsqueezed dimension at the end
+                    # of the shape, fusion is impossible.
+                    return False
+                return True
+        return False

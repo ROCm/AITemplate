@@ -14,10 +14,9 @@
 #
 from typing import Any, List, Optional, Set
 
-from ..base import Operator, Tensor
-from ..ops.conv.common_conv2d_bias_add_activation import conv2d_bias_add_activation
-from .toposort import toposort
-from .transform_utils import (
+from aitemplate.compiler.base import Operator, Tensor
+from aitemplate.compiler.transform.toposort import toposort
+from aitemplate.compiler.transform.transform_utils import (
     copy_tensor_attributes,
     remove_dst_op_from_tensor,
     replace_tensor,
@@ -101,6 +100,7 @@ def transform_simple_fusion_patterns(
 ) -> List[Tensor]:
     output_tensors = []
     to_remove = set()
+    has_modified = False
     for tensor in sorted_graph:
         if tensor in to_remove:
             to_remove.remove(tensor)
@@ -120,6 +120,7 @@ def transform_simple_fusion_patterns(
         src_op = extract_only_one_op(tensor._attrs["src_ops"])
         inputs = list(src_op._attrs["inputs"])
         to_remove_dst_op[src_op] = list(inputs)
+        src_op_num_inputs = len(inputs)
 
         last_tensor = tensor
         to_remove_candidate.add(last_tensor)
@@ -158,26 +159,27 @@ def transform_simple_fusion_patterns(
         # A final check to make sure our replacement is valid.
         new_op = fusion_patterns[fusion_idx][1]
 
+        # For bias_add fusion, use is_valid_inputs
         check_inputs_func = getattr(new_op, "is_valid_inputs", None)
         if check_inputs_func is not None:
             valid, _ = check_inputs_func(*inputs)
             if not valid:
                 continue
-
-        # TODO: remove after broadcasting is supported
-        # special shape check for conv2d_bias_add_activation ops
-        if issubclass(new_op, conv2d_bias_add_activation):
-            assert len(inputs) >= 4, (
-                f"The number of inputs must be larger than 4 for conv2d_bias_add_activation "
-                f"family fusions. Current number of inputs: {len(inputs)}"
-            )
-            residual = inputs[3]
-            y = src_op._attrs["outputs"][0]
-            if y.shape() != residual.shape():
+        else:
+            # gemm/conv epilogue fusion with elementwise ops doesn't
+            # support broadcasting except for bias_add.
+            # Here we do assume that all other inputs are elementwise inputs.
+            cannot_fuse = False
+            for elementwise_input in inputs[src_op_num_inputs:]:
+                if tensor.shape() != elementwise_input.shape():
+                    cannot_fuse = True
+                    break
+            if cannot_fuse:
                 continue
 
         # inputs here might not be ready in graph. But we will toposort again
         # at end of pass so it's okay.
+        has_modified = True
         new_tensor = new_op(**src_op._get_op_attributes())(*inputs)
         copy_tensor_attributes(new_tensor, last_tensor)
         if new_tensor._attrs["is_output"]:
@@ -187,5 +189,7 @@ def transform_simple_fusion_patterns(
             remove_dst_op_from_tensor(tensors, dst_op)
         to_remove |= to_remove_candidate
 
-    new_sorted_graph = toposort(output_tensors)
-    return sanitize_sorted_graph(new_sorted_graph)
+    if has_modified:
+        sorted_graph = toposort(output_tensors)
+        sorted_graph = sanitize_sorted_graph(sorted_graph)
+    return sorted_graph

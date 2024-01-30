@@ -16,10 +16,11 @@
 GEMM Specialization: A.permute(0, 2, 1)[col] @ B[col]
 """
 
-from ...base import _create_host_zero_tensor, IntImm, Tensor
-from ..tensor import concatenate
-from . import gemm_common as common
-from .bmm import bmm
+from aitemplate.compiler.base import _create_host_zero_tensor, IntImm, Tensor
+from aitemplate.compiler.ops.gemm_universal import gemm_common as common
+from aitemplate.compiler.ops.gemm_universal.bmm import bmm
+from aitemplate.compiler.ops.tensor import concatenate
+from aitemplate.utils import alignment
 
 # pylint: disable=C0103, W0223, W0221, W0613
 
@@ -46,7 +47,7 @@ class perm021fc_ccr(bmm):
         self._attrs["op"] = "perm021fc_ccr"
 
         def cal_align_ab(m, n, k):
-            return common.default_align_ab(m, k)
+            return common.default_align_ab(m, k, self._attrs["inputs"][0].dtype())
 
         self._attrs["f_ab_alignment"] = cal_align_ab
 
@@ -120,7 +121,7 @@ class perm021fc_ccr(bmm):
             )
         k = ak._attrs["values"][0]
 
-        if k % 2 != 0:
+        if not alignment.valid_alignment(k % 2, a.dtype()):
             pad_k = int((k // 8 + 1) * 8)
 
             pad_a = _create_host_zero_tensor(

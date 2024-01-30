@@ -17,7 +17,8 @@ Common codegen functions for ROCM.
 """
 import jinja2
 
-from .. import registry
+from aitemplate.backend import registry
+from aitemplate.backend.backend_spec import ROCMSpec
 
 # pylint: disable=W0613
 
@@ -41,6 +42,14 @@ def void_ptr_decl(name, dtype="float16", indent="  "):
         type_string = "int64_t*"
     elif dtype == "bool":
         type_string = "bool*"
+    elif dtype == "int32":
+        type_string = "int*"
     else:
         raise NotImplementedError
     return PTR_TEMPLATE.render(name=name, dtype=type_string, indent=indent)
+
+
+@registry.reg("rocm.lib.dtype_to_backend_type")
+def dtype_to_backend_type(dtype):
+    backend_spec = ROCMSpec()
+    return backend_spec.dtype_to_backend_type(dtype)

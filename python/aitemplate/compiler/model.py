@@ -19,12 +19,14 @@ import ctypes
 import enum
 import logging
 import math
+import struct
 from typing import Callable, Dict, List, NamedTuple, Optional, Tuple, TypeVar, Union
 
 import numpy as np
 
 from aitemplate.compiler.dtype import dtype_str_to_enum
-from aitemplate.utils.torch_utils import torch_dtype_to_string
+from aitemplate.utils.misc import is_linux, is_windows
+from aitemplate.utils.torch_utils import torch_dtype_to_string, write_tensor_binary
 
 # Controls how many runtimes will be used in ModelContainer by default.
 # See the runtime README.md for more information on the Model/ModelContainer
@@ -37,84 +39,6 @@ AIT_DEFAULT_NUM_RUNTIMES = 1
 # Stand-in for torch.Tensor. Use a TypeVar for some APIs since we can't introduce
 # a torch dependency.
 TorchTensor = TypeVar("TorchTensor")
-
-
-def _dlclose(dll: ctypes.CDLL):
-    syms = ctypes.CDLL(None)
-    if hasattr(syms, "dlclose"):
-        f_dlclose = syms.dlclose
-        f_dlclose.argtypes = [ctypes.c_void_p]
-        f_dlclose(dll._handle)
-    else:
-        logging.warning("dlclose() not found, library may not be unloaded properly!")
-
-
-def _check_tensors(
-    tensor_list: Union[Dict[str, TorchTensor], List[TorchTensor]],
-    is_error_fn: Callable[[TorchTensor], bool],
-    list_name: str,
-    condition_description: str,
-):
-    """
-    Helper for various input/output sanity checks.
-    """
-    if isinstance(tensor_list, dict):
-        tensor_list = tensor_list.values()
-
-    for i, tensor in enumerate(tensor_list):
-        if is_error_fn(tensor):
-            raise ValueError(f"{list_name}[{i}] failed check: {condition_description}")
-
-
-def _check_tensors_contiguous_and_on_gpu(
-    tensors: Union[Dict[str, TorchTensor], List[TorchTensor]], name: str
-):
-    def is_bad_tensor(tensor: TorchTensor) -> bool:
-        return not tensor.is_contiguous() or not tensor.is_cuda
-
-    _check_tensors(tensors, is_bad_tensor, name, "contiguous and on GPU")
-
-
-def _check_tensors_contiguous_and_on_host(
-    tensors: Union[Dict[str, TorchTensor], List[TorchTensor]], name: str
-):
-    def is_bad_tensor(tensor: TorchTensor) -> bool:
-        return not tensor.is_contiguous() or tensor.is_cuda
-
-    _check_tensors(tensors, is_bad_tensor, name, "contiguous and on host")
-
-
-def torch_to_ait_data(tensor):
-    """
-    Convert a torch Tensor to a AITData.
-    """
-    return AITData(
-        tensor.data_ptr(), list(tensor.size()), torch_dtype_to_string(tensor.dtype)
-    )
-
-
-def _convert_tensor_args(params):
-    """
-    Helper function for the WithTensors APIs.
-    """
-    if isinstance(params, dict):
-        result = {name: torch_to_ait_data(x) for name, x in params.items()}
-    else:
-        result = [torch_to_ait_data(x) for x in params]
-    return result
-
-
-def _reshape_tensor(tensor: TorchTensor, shape: List[int]) -> TorchTensor:
-    """
-    Reinterpret a blob of contiguous memory as some shape. Used to convert
-    outputs in RunWithTensors.
-    """
-    assert tensor.ndim == len(
-        shape
-    ), f"Expected output tensor's ndim to match the length of Run()'s return value: {tensor.ndim=} != {len(shape)=}"
-    numel = math.prod(shape)
-    new_tensor = tensor.flatten()[:numel]
-    return new_tensor.reshape(shape)
 
 
 class AITemplateMemcpyKind(enum.Enum):
@@ -154,37 +78,109 @@ class _CFormatAITData(ctypes.Structure):
     ]
 
 
-class Model(object):
+def _dlclose(dll: ctypes.CDLL):
+    f_dlclose = None
+
+    if is_windows():
+        f_dlclose = ctypes.windll.kernel32.FreeLibrary
+    elif is_linux():
+        syms = ctypes.CDLL(None)
+        if not hasattr(syms, "dlclose"):
+            # Apline Linux
+            syms = ctypes.CDLL("libc.so")
+
+        if hasattr(syms, "dlclose"):
+            f_dlclose = syms.dlclose
+
+    if f_dlclose is not None:
+        f_dlclose.argtypes = [ctypes.c_void_p]
+        f_dlclose(dll._handle)
+    else:
+        logging.warning(
+            "dll unloading function was not found, library may not be unloaded properly!"
+        )
+
+
+def _check_tensors(
+    tensor_list: Union[Dict[str, TorchTensor], List[TorchTensor]],
+    is_error_fn: Callable[[TorchTensor], bool],
+    list_name: str,
+    condition_description: str,
+):
+    """
+    Helper for various input/output sanity checks.
+    """
+    if isinstance(tensor_list, dict):
+        tensor_list = tensor_list.values()
+
+    for i, tensor in enumerate(tensor_list):
+        if is_error_fn(tensor):
+            raise ValueError(f"{list_name}[{i}] failed check: {condition_description}")
+
+
+def _check_tensors_contiguous_and_on_gpu(
+    tensors: Union[Dict[str, TorchTensor], List[TorchTensor]], name: str
+):
+    def is_bad_tensor(tensor: TorchTensor) -> bool:
+        return not tensor.is_contiguous() or not tensor.is_cuda
+
+    _check_tensors(tensors, is_bad_tensor, name, "contiguous and on GPU")
+
+
+def _check_tensors_contiguous_and_on_host(
+    tensors: Union[Dict[str, TorchTensor], List[TorchTensor]], name: str
+):
+    def is_bad_tensor(tensor: TorchTensor) -> bool:
+        return not tensor.is_contiguous() or tensor.is_cuda
+
+    _check_tensors(tensors, is_bad_tensor, name, "contiguous and on host")
+
+
+def torch_to_ait_data(tensor: TorchTensor) -> AITData:
+    """
+    Convert a torch Tensor to a AITData.
+    """
+    return AITData(
+        tensor.data_ptr(), list(tensor.size()), torch_dtype_to_string(tensor.dtype)
+    )
+
+
+def _convert_tensor_args(params: Union[List[TorchTensor], Dict[str, TorchTensor]]):
+    """
+    Helper function for the WithTensors APIs.
+    """
+    if isinstance(params, dict):
+        result = {name: torch_to_ait_data(x) for name, x in params.items()}
+    else:
+        result = [torch_to_ait_data(x) for x in params]
+    return result
+
+
+def _reshape_tensor(tensor: TorchTensor, shape: List[int]) -> TorchTensor:
+    """
+    Reinterpret a blob of contiguous memory as some shape. Used to convert
+    outputs in RunWithTensors.
+    """
+    assert tensor.ndim == len(
+        shape
+    ), f"Expected output tensor's ndim to match the length of Run()'s return value: {tensor.ndim=} != {len(shape)=}"
+    numel = math.prod(shape)
+    new_tensor = tensor.flatten()[:numel]
+    return new_tensor.reshape(shape)
+
+
+class Model:
     class _DLLWrapper:
         def __init__(
             self,
             lib_path: str,
-            num_runtimes: int,
-            allocator_kind: Optional[AITemplateAllocatorKind],
         ):
             self.lib_path = lib_path
             self.DLL = ctypes.cdll.LoadLibrary(lib_path)
-
-            self.handle = ctypes.c_void_p()
-            self.allocator_handle = ctypes.c_void_p()
-            if allocator_kind is not None:
-                self.DLL.AITemplateAllocatorCreate(
-                    ctypes.byref(self.allocator_handle),
-                    ctypes.c_int(allocator_kind.value),
-                )
-
-            self.DLL.AITemplateModelContainerCreate(
-                ctypes.pointer(self.handle),
-                ctypes.c_size_t(num_runtimes),
-                self.allocator_handle,
-            )
             self.is_open = True
 
         def close(self):
             if self.is_open:
-                self.DLL.AITemplateModelContainerDelete(self.handle)
-                if self.allocator_handle:
-                    self.DLL.AITemplateAllocatorDelete(self.allocator_handle)
                 _dlclose(self.DLL)
                 self.is_open = False
 
@@ -217,16 +213,33 @@ class Model(object):
         num_runtimes : int, optional
             How many runtimes should be stored in the internal pool. This
             determines how many inferences can happen concurrently. By
-            default, set to 2. Must be positive.
+            default, set to 1. Must be positive.
         allocator_kind : AITemplateAllocatorKind, optional
             What type of allocator to use when allocating GPU memory.
         """
+        # Set of pointers allocated with numpy_to_ait_data.
+        # If the user forgets to free their data, we use this to
+        # avoid leaking memory.
+        self._allocated_ait_data = set()
+
         if num_runtimes <= 0:
             raise ValueError(f"num_runtimes must be positive, but got {num_runtimes}")
 
-        self.DLL = self._DLLWrapper(lib_path, num_runtimes, allocator_kind)
-        self.handle = self.DLL.handle
-        self.lib_path = self.DLL.lib_path
+        self.DLL = self._DLLWrapper(lib_path)
+        self.lib_path = lib_path
+        self.handle = ctypes.c_void_p()
+        self.allocator_handle = ctypes.c_void_p()
+        if allocator_kind is not None:
+            self.DLL.AITemplateAllocatorCreate(
+                ctypes.byref(self.allocator_handle),
+                ctypes.c_int(allocator_kind.value),
+            )
+
+        self.DLL.AITemplateModelContainerCreate(
+            ctypes.pointer(self.handle),
+            ctypes.c_size_t(num_runtimes),
+            self.allocator_handle,
+        )
 
         # We use this list to add reference counts of Torch tensors
         # to avoid lifetime issues caused by user misuse.
@@ -242,11 +255,6 @@ class Model(object):
             for i in range(len(self._output_name_to_index))
         ]
 
-        # Set of pointers allocated with numpy_to_ait_data.
-        # If the user forgets to free their data, we use this to
-        # avoid leaking memory.
-        self._allocated_ait_data = set()
-
     def __enter__(self):
         return self
 
@@ -260,7 +268,19 @@ class Model(object):
         # Copy to avoid set size changed during iteration
         for ptr in list(self._allocated_ait_data):
             self.free_gpu_memory(ptr, sync=True)
-        self.DLL.close()
+
+        # Check that it exists since we may have thrown
+        # an exception before initializing it.
+        if hasattr(self, "DLL"):
+            if self.handle:
+                self.DLL.AITemplateModelContainerDelete(self.handle)
+                self.handle = ctypes.c_void_p()
+
+            if self.allocator_handle:
+                self.DLL.AITemplateAllocatorDelete(self.allocator_handle)
+                self.allocator_handle = ctypes.c_void_p()
+
+            self.DLL.close()
 
     def __getstate__(self):
         return {"lib_path": self.DLL.lib_path}
@@ -323,7 +343,7 @@ class Model(object):
                 f"Did not get correct number of {'inputs' if is_inputs else 'outputs'} expected {len(index_map)}, got {len(params)}"
             )
 
-        result = [None for i in range(len(index_map))]
+        result = [None] * len(index_map)
         for name, tensor in params.items():
             if name not in index_map:
                 raise ValueError(
@@ -334,9 +354,46 @@ class Model(object):
 
         return result
 
+    def _write_tensors_for_standalone_testcase(
+        self,
+        tensor_dict: Dict[str, TorchTensor],
+        file_handle,
+        is_inputs: bool = True,
+    ) -> None:
+        if is_inputs:
+            index_map = self._input_name_to_index
+        else:
+            index_map = self._output_name_to_index
+        result = [None] * len(index_map)
+        for name, tensor in tensor_dict.items():
+            if name not in index_map:
+                raise ValueError(
+                    f"Got unexpected {'input' if is_inputs else 'output'}: {name}"
+                )
+            idx = index_map[name]
+            result[idx] = tensor
+        for tensor in result:
+            write_tensor_binary(tensor, file_handle)
+
+    def write_standalone_testcase_data(
+        self,
+        filename,
+        inputs: Dict[str, TorchTensor],
+        expected_outputs: List[TorchTensor],
+        atol=1e-2,
+        rtol=1e-2,
+    ):
+        with open(filename, "wb") as file_handle:
+            file_handle.write(struct.pack("ff", atol, rtol))
+            self._write_tensors_for_standalone_testcase(
+                tensor_dict=inputs, file_handle=file_handle
+            )
+            for out in expected_outputs:
+                write_tensor_binary(out, file_handle)
+
     def _make_ait_outputs(
         self, outputs: List[AITData], c_output_shapes
-    ) -> Dict[str, List[int]]:
+    ) -> Dict[str, AITData]:
         output_shapes = []
         for i, c_shape in enumerate(c_output_shapes):
             shape = []
@@ -434,6 +491,58 @@ class Model(object):
             inputs, outputs, stream_ptr, sync, graph_mode, outputs_on_host=False
         )
 
+    def profile(
+        self,
+        inputs: Union[Dict[str, AITData], List[AITData]],
+        outputs: Union[Dict[str, AITData], List[AITData]],
+        num_iters: int,
+        filename: str,
+        stream_ptr: Optional[int] = None,
+    ) -> None:
+        if isinstance(inputs, dict):
+            inputs = self._dict_to_ordered_list(inputs, is_inputs=True)
+        if isinstance(outputs, dict):
+            outputs = self._dict_to_ordered_list(outputs, is_inputs=False)
+        (c_inputs, c_outputs, c_stream, c_output_shapes_out,) = self._prepare_run(
+            inputs,
+            outputs,
+            stream_ptr,
+        )
+        self.DLL.AITemplateModelContainerProfile(
+            self.handle,
+            c_inputs,
+            ctypes.c_size_t(len(inputs)),
+            c_outputs,
+            ctypes.c_size_t(len(outputs)),
+            c_stream,
+            ctypes.c_size_t(num_iters),
+            ctypes.c_char_p(filename.encode("utf-8")),
+        )
+
+    def profile_with_tensors(
+        self,
+        inputs: Union[List[TorchTensor], Dict[str, TorchTensor]],
+        outputs: Union[List[TorchTensor], Dict[str, TorchTensor]],
+        num_iters: int,
+        filename: str,
+        stream_ptr: Optional[int] = None,
+    ) -> None:
+        _check_tensors_contiguous_and_on_gpu(
+            inputs,
+            name="inputs",
+        )
+        _check_tensors_contiguous_and_on_gpu(
+            outputs,
+            name="outputs",
+        )
+        self.profile(
+            _convert_tensor_args(inputs),
+            _convert_tensor_args(outputs),
+            num_iters,
+            filename,
+            stream_ptr,
+        )
+
     def _interpret_tensors_as_shapes(
         self,
         outputs: Union[List[TorchTensor], Dict[str, TorchTensor]],
@@ -488,7 +597,7 @@ class Model(object):
     def _run_with_outputs_on_host(
         self,
         inputs: Union[Dict[str, AITData], List[AITData]],
-        outputs: Union[Dict[str, int], List[int]],
+        outputs: Union[Dict[str, AITData], List[AITData]],
         stream_ptr: Optional[int] = None,
         graph_mode: bool = False,
     ) -> Dict[str, AITData]:
@@ -497,7 +606,7 @@ class Model(object):
         the stream will always be synchronized after copying the outputs to the host.
 
         Warning: don't use this! It's not optimal with respect to performance.
-        It's here for use by internal constant folding passes.
+        It's here for use if you need it for debugging purpose.
         """
         return self._run_impl(
             inputs, outputs, stream_ptr, graph_mode=graph_mode, outputs_on_host=True
@@ -514,7 +623,7 @@ class Model(object):
         Like RunWithTensors(), but takes host memory tensors
 
         Warning: don't use this! It's not optimal with respect to performance.
-        It's here for use by internal constant folding passes.
+        It's here for use if you need it for debugging.
         """
         _check_tensors_contiguous_and_on_gpu(
             inputs,
@@ -535,7 +644,7 @@ class Model(object):
     def benchmark(
         self,
         inputs: Union[Dict[str, AITData], List[AITData]],
-        outputs: Union[Dict[str, int], List[int]],
+        outputs: Union[Dict[str, AITData], List[AITData]],
         stream_ptr: Optional[int] = None,
         graph_mode: bool = False,
         count: int = 10,
@@ -683,6 +792,97 @@ class Model(object):
         self.DLL.AITemplateModelContainerSetConstant(
             self.handle, c_name, ctypes.byref(c_tensor)
         )
+
+    def set_many_constants(self, tensors: Dict[str, AITData]):
+        """
+        Bulk set many constants at once. More efficient than set_constant()
+        since it only has to acquire the lock once.
+        """
+        c_names = (ctypes.c_char_p * len(tensors))()
+        c_tensors = (_CFormatAITData * len(tensors))()
+        ait_tensors = {
+            name.encode("utf-8"): self._convert_single_param_to_c_format(tensor)
+            for name, tensor in tensors.items()
+        }
+        for i, (name_bytes, tensor) in enumerate(ait_tensors.items()):
+            c_names[i] = ctypes.c_char_p(name_bytes)
+            c_tensors[i] = tensor
+
+        num_tensors = ctypes.c_size_t(len(tensors))
+        self.DLL.AITemplateModelContainerSetManyConstants(
+            self.handle, c_names, c_tensors, num_tensors
+        )
+
+    def set_double_buffer_constant(
+        self, name: str, tensor: AITData, stream_ptr: Optional[int] = None
+    ):
+        """
+        Set a constant. All constants must have values before calling run().
+
+        Note that the pointer inside tensor must be valid for the entire
+        duration of run().
+        """
+        b_name = name.encode("utf-8")
+        c_name = ctypes.c_char_p(b_name)
+        c_tensor = self._convert_single_param_to_c_format(tensor)
+        self.DLL.AITemplateModelContainerSetDoubleBufferConstant(
+            self.handle, ctypes.c_void_p(stream_ptr), c_name, ctypes.byref(c_tensor)
+        )
+
+    def set_many_double_buffer_constants(
+        self, tensors: Dict[str, AITData], stream_ptr: Optional[int] = None
+    ):
+        """
+        Bulk set many constants at once. More efficient than set_constant()
+        since it only has to acquire the lock once.
+        """
+        c_names = (ctypes.c_char_p * len(tensors))()
+        c_tensors = (_CFormatAITData * len(tensors))()
+        ait_tensors = {
+            name.encode("utf-8"): self._convert_single_param_to_c_format(tensor)
+            for name, tensor in tensors.items()
+        }
+        for i, (name_bytes, tensor) in enumerate(ait_tensors.items()):
+            c_names[i] = ctypes.c_char_p(name_bytes)
+            c_tensors[i] = tensor
+
+        num_tensors = ctypes.c_size_t(len(tensors))
+        self.DLL.AITemplateModelContainerSetManyDoubleBufferConstants(
+            self.handle, ctypes.c_void_p(stream_ptr), c_names, c_tensors, num_tensors
+        )
+
+    def set_many_constants_with_tensors(self, tensors: Dict[str, TorchTensor]):
+        ait_tensors = {}
+        for name, tensor in tensors.items():
+            if not tensor.is_contiguous() or not tensor.is_cuda:
+                raise ValueError(f"Constant {name} must be contiguous and on the GPU.")
+            self.torch_constant_tensors[name] = tensor
+            ait_tensors[name] = torch_to_ait_data(tensor)
+        self.set_many_constants(ait_tensors)
+
+    def set_double_buffer_constant_with_tensor(
+        self, name: str, tensor: TorchTensor, stream_ptr: Optional[int] = None
+    ):
+        """
+        Set a constant with a PyTorch tensor.
+        Model will store a reference to the given tensor in
+        torch_constant_tensors until it is explicitly deleted or replaced.
+        """
+        if not tensor.is_contiguous() or not tensor.is_cuda:
+            raise ValueError(f"Constant {name} must be contiguous and on the GPU.")
+        self.torch_constant_tensors[name] = tensor
+        self.set_double_buffer_constant(name, torch_to_ait_data(tensor), stream_ptr)
+
+    def set_many_double_buffer_constants_with_tensors(
+        self, tensors: Dict[str, TorchTensor], stream_ptr: Optional[int] = None
+    ):
+        ait_tensors = {}
+        for name, tensor in tensors.items():
+            if not tensor.is_contiguous() or not tensor.is_cuda:
+                raise ValueError(f"Constant {name} must be contiguous and on the GPU.")
+            self.torch_constant_tensors[name] = tensor
+            ait_tensors[name] = torch_to_ait_data(tensor)
+        self.set_many_double_buffer_constants(ait_tensors, stream_ptr)
 
     def set_constant_with_tensor(self, name: str, tensor: TorchTensor):
         """
@@ -849,3 +1049,55 @@ class Model(object):
             stream_ptr=stream_ptr,
         )
         return arr
+
+    def fold_constants(
+        self,
+        stream_ptr: Optional[int] = None,
+        sync: bool = True,
+        double_buffer: bool = False,
+    ):
+        if double_buffer:
+            self.DLL.AITemplateModelContainerFoldConstantsInDoubleBuffer(
+                self.handle,
+                ctypes.c_void_p(stream_ptr),
+                ctypes.c_bool(sync),
+            )
+        else:
+            self.DLL.AITemplateModelContainerFoldConstants(
+                self.handle,
+                ctypes.c_void_p(stream_ptr),
+                ctypes.c_bool(sync),
+            )
+
+    def swap_constants(self):
+        self.DLL.AITemplateModelContainerSwapConstants(self.handle)
+
+    def _get_constant_names_impl(
+        self, unbound_constants_only: bool, constant_folding_only: bool
+    ) -> List[str]:
+        num_constants = ctypes.c_size_t()
+        constant_folding_inputs_only = ctypes.c_bool(constant_folding_only)
+        unbound_constants_only_ = ctypes.c_bool(unbound_constants_only)
+        self.DLL.AITemplateModelContainerGetNumConstants(
+            self.handle,
+            unbound_constants_only_,
+            constant_folding_inputs_only,
+            ctypes.byref(num_constants),
+        )
+        names = (ctypes.c_char_p * num_constants.value)()
+        self.DLL.AITemplateModelContainerGetConstantNames(
+            self.handle, unbound_constants_only_, constant_folding_inputs_only, names
+        )
+        return [name.decode("utf-8") for name in names]
+
+    def get_constant_names(
+        self, unbound_constants_only: bool = True, constant_folding_only: bool = False
+    ) -> List[str]:
+        return self._get_constant_names_impl(
+            unbound_constants_only, constant_folding_only
+        )
+
+    def get_constant_folding_input_names(
+        self, unbound_constants_only: bool = True
+    ) -> List[str]:
+        return self._get_constant_names_impl(unbound_constants_only, True)

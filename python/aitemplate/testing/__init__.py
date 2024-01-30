@@ -15,11 +15,8 @@
 """
 testing module
 """
-from . import benchmark_ait, benchmark_pt
-from .detect_target import detect_target
+from aitemplate.testing import benchmark_ait, benchmark_pt
+from aitemplate.testing.detect_target import detect_target
+from aitemplate.testing.profile import profile_callable
 
-__all__ = [
-    "benchmark_pt",
-    "benchmark_ait",
-    "detect_target",
-]
+__all__ = ["benchmark_pt", "benchmark_ait", "detect_target", "profile_callable"]

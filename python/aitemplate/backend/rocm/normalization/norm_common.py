@@ -18,12 +18,13 @@ Normalization common codegen for ROCM.
 
 import os
 import re
+from collections import OrderedDict
 from hashlib import sha1
-from typing import Any, Dict, OrderedDict
+from typing import Any, Dict
 
 import jinja2
 
-from ...target import Target
+from aitemplate.backend.target import Target
 
 FUNC_CALL_PARAM_TEMPLATE = jinja2.Template("(void *)({{name}})")
 
@@ -112,24 +113,6 @@ struct ProfilerMemoryPool {
   rocrand_generator generator;
 };
 
-// hack for DeviceMem linking error
-// TODO fix this by making CK a header-only lib
-// <<< hack begin
-DeviceMem::DeviceMem(std::size_t mem_size) : mMemSize(mem_size)
-{
-  hipGetErrorString(hipMalloc(static_cast<void**>(&mpDeviceBuf), mMemSize));
-}
-void* DeviceMem::GetDeviceBuffer() const { return mpDeviceBuf; }
-void DeviceMem::ToDevice(const void* p) const
-{
-  hipGetErrorString(
-        hipMemcpy(mpDeviceBuf, const_cast<void*>(p), mMemSize, hipMemcpyHostToDevice));
-}
-void DeviceMem::FromDevice(void* p) const
-{
-  hipGetErrorString(hipMemcpy(p, mpDeviceBuf, mMemSize, hipMemcpyDeviceToHost));
-}
-DeviceMem::~DeviceMem() { hipGetErrorString(hipFree(mpDeviceBuf)); }
 struct KernelTimerImpl
 {
   KernelTimerImpl() {
@@ -140,12 +123,12 @@ struct KernelTimerImpl
     hipGetErrorString(hipEventDestroy(mStart));
     hipGetErrorString(hipEventDestroy(mEnd));
   }
-  void Start() {
+  void Start(hipStream_t stream) {
     hipGetErrorString(hipDeviceSynchronize());
-    hipGetErrorString(hipEventRecord(mStart, nullptr));
+    hipGetErrorString(hipEventRecord(mStart, stream));
   }
-  void End() {
-    hipGetErrorString(hipEventRecord(mEnd, nullptr));
+  void End(hipStream_t stream) {
+    hipGetErrorString(hipEventRecord(mEnd, stream));
     hipGetErrorString(hipEventSynchronize(mEnd));
   }
   float GetElapsedTime() const {
@@ -173,16 +156,16 @@ int main(int argc, char** argv) {
   hipStream_t stream = nullptr;
   {{tensor_decl}}
   // warmup
-  for(int i = 0; i < 3; ++i) {
+  for(int i = 0; i < 5; ++i) {
     {{func_call}}
   }
   // run
   KernelTimerImpl timer;
-  timer.Start();
-  for(int i = 0; i < 5; ++i) {
+  timer.Start(stream);
+  for(int i = 0; i < 10; ++i) {
     {{func_call}}
   }
-  timer.End();
+  timer.End(stream);
   std::cout << "OP:" << "{{op_name}}" << ",";
   std::cout << "TIME:" << timer.GetElapsedTime() << ",";
   std::cout << "WS:" << GLOBAL_WORKSPACE_SIZE << std::endl;
@@ -200,8 +183,7 @@ FUNC_TEMPLATE = jinja2.Template(
 #include <random>
 #include <rocrand/rocrand.h>
 #include "logging.h"
-#include "include/ck/utility/print.hpp"
-#include "library/include/ck/library/utility/device_memory.hpp"
+
 #include "library/include/ck/library/utility/host_tensor.hpp"
 #include "library/include/ck/library/utility/host_tensor_generator.hpp"
 #include "include/ck/tensor_operation/gpu/device/tensor_layout.hpp"
@@ -340,7 +322,6 @@ def gen_profiler(
     op_instance = func_attrs["op_instance"]
     file_pairs = []
     for op_name, op in op_instance.items():
-
         config = emit_instance(op)
         config_name = extract_config_name(config)
         instances = INSTANCE_TEMPLATE.render(

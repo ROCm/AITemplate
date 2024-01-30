@@ -17,8 +17,8 @@ Codegen functions for pad_last_dim.
 """
 import jinja2
 
-from ... import registry
-from ...backend_spec import CUDASpec
+from aitemplate.backend import registry
+from aitemplate.backend.backend_spec import CUDASpec
 
 # pylint: disable=C0301,W0613,W0612
 
@@ -227,6 +227,8 @@ def gen_function(func_attrs, template_path, shape_eval_template, shape_save_temp
     elem_input_type2 = None
     if elem_input_type == "half":
         elem_input_type2 = "half2"
+    elif elem_input_type == "float":
+        elem_input_type2 = "float2"
     else:
         raise NotImplementedError(f"unsupported {elem_input_type=}")
     ndim = func_attrs["ndim"]

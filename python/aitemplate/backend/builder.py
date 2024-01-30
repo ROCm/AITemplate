@@ -18,47 +18,172 @@ Builder is a module to compile generated source code files into binary objects.
 
 from __future__ import annotations
 
+import logging
 import multiprocessing
-
 import os
-import pathlib
 import re
 import shlex
 import subprocess
-import typing
-from typing import Optional
+from hashlib import sha1
+from pathlib import Path
+from typing import List, Optional, Tuple, Union
 
 import jinja2
 
-from ..utils import logger
-from .target import Target
-from .task_runner import BaseRunner, Task
+from aitemplate.backend import build_cache
+from aitemplate.backend.build_cache_base import write_binhash_file
+
+from aitemplate.backend.target import Target
+from aitemplate.backend.task_runner import BaseRunner, Task
+
+from aitemplate.utils import environ
+
+from aitemplate.utils.debug_settings import AITDebugSettings
+
+from aitemplate.utils.environ import is_cmake_compilation
+from aitemplate.utils.misc import is_debug, is_windows
 
 # pylint: disable=W0221,C0103
 
 
-def _run_make_cmds(cmds, timeout):
-    logger.debug(__name__, f"make {cmds=}")
-    proc = subprocess.Popen(
-        [" && ".join(cmds)],
-        shell=True,
-        env=os.environ.copy(),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+_LOGGER = logging.getLogger(__name__)
+_DEBUG_SETTINGS = AITDebugSettings()
+
+
+def _augment_for_trace(cmd):
+    return (
+        'date +"{{\\"name\\": \\"$@\\", \\"ph\\": \\"B\\", \\"pid\\": \\"$$$$\\", \\"ts\\": \\"%s%6N\\"}},";'
+        " {}; "
+        'date +"{{\\"name\\": \\"$@\\", \\"ph\\": \\"E\\", \\"pid\\": \\"$$$$\\", \\"ts\\": \\"%s%6N\\"}},";'
+    ).format(cmd)
+
+
+def _time_cmd(cmd):
+    return (
+        f"exec time -f 'exit_status=%x elapsed_sec=%e argv=\"%C\"' {cmd}"
+        if environ.time_compilation()
+        else cmd
     )
-    try:
-        out, err = proc.communicate(timeout)
-    except subprocess.TimeoutExpired as e:
-        proc.kill()
-        out, err = proc.communicate()
-        raise e
-    finally:
-        if proc.returncode != 0:
-            # Let's always print out more info upon any failures.
-            logger_f = logger.info
-        else:
-            logger_f = logger.debug
-        logger_f(__name__, f"make stdout: {out.decode()}\nmake stderr: {err.decode()}")
+
+
+def _log_error_context(
+    stderr,
+    build_dir,
+    context_radius=10,
+    max_errors_per_file=5,
+    padding=5,
+):
+    path_to_error_lines = {}
+    for line in [L for L in stderr.split("\n") if ": error:" in L]:
+        match = re.search(r"(.+)\((\d+)\): error:.*", line)
+        if match:
+            path = match[1]
+            error_line = match[2]
+            if path not in path_to_error_lines:
+                path_to_error_lines[path] = set()
+            # nvcc line numbers are 1-based
+            error_line = int(error_line) - 1
+            path_to_error_lines[path].add(error_line)
+
+    # keep only the first N error lines per file
+    path_to_error_lines = {
+        path: sorted(error_lines)[:max_errors_per_file]
+        for path, error_lines in path_to_error_lines.items()
+    }
+
+    path_to_visible_lines = {}
+    for path, error_lines in path_to_error_lines.items():
+        path_to_visible_lines[path] = set()
+        for error_line in error_lines:
+            # collect the context lines around each error line
+            context = range(
+                error_line - context_radius,
+                error_line + context_radius + 1,
+            )
+            path_to_visible_lines[path].update(list(context))
+
+    for path, visible_lines in path_to_visible_lines.items():
+        full_path = os.path.join(build_dir, path)
+        if os.path.exists(full_path):
+            # read the lines from the file
+            with open(full_path, "r") as f:
+                # each line ends with '\n'
+                file_lines = f.readlines()
+            # except maybe the last line
+            if file_lines and not file_lines[-1].endswith("\n"):
+                file_lines[-1] = f"{file_lines[-1]}\n"
+            num_file_lines = len(file_lines)
+
+            error_lines = path_to_error_lines[path]
+            visible_lines = sorted(visible_lines)
+
+            lines_to_show = []
+            last_printed_i = -1
+            for i in visible_lines:
+                if i < 0 or i >= num_file_lines:
+                    # skip the line number as extraneous
+                    continue
+                if i - last_printed_i > 1:
+                    # preceding ellipsis
+                    lines_to_show.append("...\n")
+                line = file_lines[i]
+                lines_to_show.append(f"{i+1:<{padding}} {line}")
+                if i in error_lines:
+                    # mark the line as an error line: underscore
+                    spaces = line[: len(line) - len(line.lstrip())]
+                    underscore = spaces + "^" * (len(line) - len(spaces) - 1)
+                    lines_to_show.append(f"{' ' * padding} {underscore}\n")
+                last_printed_i = i
+            if visible_lines[-1] < num_file_lines - 1:
+                # closing ellipsis
+                lines_to_show.append("...\n")
+
+            if lines_to_show:
+                # all lines_to_show end with '\n'
+                summary = "".join(lines_to_show)
+                _LOGGER.info(f"{path}:\n\n{summary}")
+
+
+def _run_make_cmds(cmds, timeout, build_dir, allow_cache=True):
+    _LOGGER.debug(f"make {cmds=}")
+    if allow_cache:
+        (
+            cached_results_available,
+            store_cache_key,
+        ) = build_cache.BUILD_CACHE.retrieve_build_cache(cmds, build_dir)
+    else:
+        cached_results_available, store_cache_key = False, None
+    if not cached_results_available:
+        proc = subprocess.Popen(  # noqa: P204
+            [" && ".join(cmds)],
+            shell=True,
+            env=os.environ.copy(),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        try:
+            out, err = proc.communicate(timeout)
+            if proc.returncode == 0 and store_cache_key is not None:
+                build_cache.BUILD_CACHE.store_build_cache(
+                    cmds, build_dir, store_cache_key
+                )
+        except subprocess.TimeoutExpired as e:
+            proc.kill()
+            out, err = proc.communicate()
+            raise e
+        finally:
+            stdout = out.decode()
+            stderr = err.decode()
+            if proc.returncode != 0:
+                _LOGGER.info(f"make stdout:\n\n{stdout}")
+                _LOGGER.info(f"make stderr:\n\n{stderr}")
+
+                _log_error_context(stderr, build_dir)
+
+                raise RuntimeError("Build has failed.")
+            else:
+                _LOGGER.debug(f"make stdout:\n\n{stdout}")
+                _LOGGER.debug(f"make stderr:\n\n{stderr}")
 
 
 def process_task(task: Task) -> None:
@@ -75,16 +200,14 @@ def process_task(task: Task) -> None:
     stderr = task._stderr
     if task._proc.returncode != 0:
         task._failed = True
-        logger.info(
-            __name__,
+        _LOGGER.info(
             "Failed: [{name}]\ncmd:\n{cmd}\nstderr:\n{stderr}\nstdout:{stdout}".format(
                 name=task._name, cmd=task._cmd, stderr=stderr, stdout=stdout
             ),
         )
         task._ret = -1
     else:
-        logger.debug(
-            __name__,
+        _LOGGER.debug(
             "Successful: [{name}]\ncmd:\n{cmd}\nstderr:\n{stderr}\nstdout:{stdout}".format(
                 name=task._name, cmd=task._cmd, stderr=stderr, stdout=stdout
             ),
@@ -115,25 +238,24 @@ class Runner(BaseRunner):
     Runner is inherited from BaseRunner.
     """
 
-    def __init__(self, devs: list[int], timeout: int = 10):
+    def __init__(self, devs: List[int], timeout: int = 10):
         """Initialize a parallel runner for building
 
         Parameters
         ----------
-        devs : list[int]
+        devs : List[int]
             CPU ids for compiling
         timeout : int, optional
             Compiling timeout, by default 10 (seconds)
         """
         super().__init__(devs, "builder", timeout)
-        logger.info(
-            __name__,
+        _LOGGER.info(
             "Using {n} CPU for building".format(n=devs),
         )
         self._ftask_proc = process_task
         self._fret_proc = process_return
 
-    def push(self, idx: typing.Union[int, str], cmd: str, target: Target) -> None:
+    def push(self, idx: Union[int, str], cmd: str, target: Target) -> None:
         """Push a building task into runner
 
         Parameters
@@ -147,7 +269,7 @@ class Runner(BaseRunner):
         """
         self._queue.append(Task(idx, cmd, target, shell=True))
 
-    def pull(self) -> list[None]:
+    def pull(self) -> List:
         """Pull building results.
         Check whether all building tasks are successful.
 
@@ -160,7 +282,7 @@ class Runner(BaseRunner):
         return ret
 
 
-class Builder(object):
+class Builder:
     """Builder is a module to compile generated source code
     files into binary objects.
     """
@@ -184,10 +306,11 @@ class Builder(object):
         self._runner = Runner(n_jobs, timeout)
         self._n_jobs = n_jobs
         self._timeout = timeout
+        self._do_trace = os.environ.get("AIT_TRACE_MAKE", False)
 
     def build_objs(
         self,
-        files: list[typing.Tuple[str, str]],
+        files: List[Tuple[str, str]],
         cc_cmd: str,
         binary_cc_cmd: Optional[str] = None,
     ):
@@ -195,7 +318,7 @@ class Builder(object):
 
         Parameters
         ----------
-        files : list[Tuple[str, str]]
+        files : List[Tuple[str, str]]
             list of tuples of source code path and object file path
         cc_cmd : str
             command line template for building objects
@@ -206,15 +329,15 @@ class Builder(object):
         """
         for idx, fpair in enumerate(files):
             src, target = fpair
-            logger.info(__name__, "Building " + target)
+            _LOGGER.info("Building " + target)
             if src.endswith(".bin"):
                 if binary_cc_cmd is None:
                     raise ValueError(
                         "Cannot compile .bin file without specifying binary_cc_cmd!"
                     )
 
-                src_path = pathlib.Path(src)
-                target_path = pathlib.Path(target)
+                src_path = Path(src)
+                target_path = Path(target)
                 compile_cmd = binary_cc_cmd.format(
                     target=target_path.name, src=src_path.name
                 )
@@ -222,7 +345,7 @@ class Builder(object):
                 # Have to cd into the containing dir so ld doesn't include
                 # the path in the symbol names; unfortunately, there's no other
                 # way to control this.
-                if logger.is_debug():
+                if is_debug():
                     cmd = f"cd {containing_dir} && {compile_cmd} && cd -"
                 else:
                     # If not in debug mode, remove the original .bin file which can potentially be quite large.
@@ -230,22 +353,23 @@ class Builder(object):
             else:
                 cmd = cc_cmd.format(target=target, src=src)
 
-            logger.debug(__name__, f"The cmd for building {target} is : {cmd}")
+            cmd = _time_cmd(cmd)
+            _LOGGER.debug(f"The cmd for building {target} is : {cmd}")
             self._runner.push(idx, cmd, target)
         self._runner.join()
         self._runner.pull()
 
-    def build_so(self, target: Target, objs: list[str]):
+    def build_so(self, target: Target, objs: List[str]):
         """Generate a task to build all objects into a dynamic library
 
         Parameters
         ----------
         target : Target
             Device target of dynamic library
-        objs : list[str]
+        objs : List[str]
             List of all object file paths for building the dynamic library.
         """
-        logger.info(__name__, "Building " + target)
+        _LOGGER.info("Building " + target)
         cc = Target.current().cc()
         compile_options = Target.current().compile_options()
         fpic = "-fPIC"
@@ -258,13 +382,13 @@ class Builder(object):
             + compile_options
             + " -o {target} {objs}".format(target=target, objs=" ".join(objs))
         )
-        logger.debug(__name__, f"The cmd for building {target} is {cmd}")
+        cmd = _time_cmd(cmd)
+        _LOGGER.debug(f"The cmd for building {target} is {cmd}")
         self._runner.push(0, cmd, target)
         self._runner.join()
         self._runner.pull()
 
-    def gen_makefile(self, file_pairs, dll_name, workdir, test_name):
-
+    def gen_makefile(self, file_pairs, dll_name, workdir, test_name, debug_settings):
         makefile_template = jinja2.Template(
             """
 CC = {{cc}}
@@ -279,20 +403,46 @@ obj_files = {{obj_files}}
     {{bfile_cmd}}
 
 .PHONY: all clean clean_constants
-all: {{target}}
+all: {{targets}}
 
-{{target}}: $(obj_files)
-    $(CC) -shared $(fPIC_flag) $(CFLAGS) -o $@ $(obj_files)
+{{dll_target}}: $(obj_files)
+    {{build_so_cmd}}
+
+{{build_standalone_rules}}
 
 clean:
-    rm -f *.obj {{target}} test.so
+    rm -f *.obj {{targets}}
 
 clean_constants:
     rm -f constants.bin
 """
         )
 
-        obj_files = [pair[1].split("/")[-1] for pair in file_pairs]
+        standalone_rules_template = jinja2.Template(
+            """
+{{standalone_src}}: {{standalone_obj}}
+    {{cfile_cmd}}
+
+{{exe_target}}: {{exe_target_deps}}
+    {{build_exe_cmd}}
+"""
+        )
+
+        build_so_cmd = "$(CC) -shared $(fPIC_flag) $(CFLAGS) -o $@ $(obj_files)"
+        standalone_src = "standalone.cu"
+        standalone_obj = "standalone.obj"
+        windll_obj = "windll.obj"
+        obj_files = []
+        # * standalone.cu is an AITemplate internal file that is used for generating
+        #   standalone executables. We only want to compile it when the relevant
+        #   debug option is enabled.
+        # * windll.cu and windll.obj are used in builder_cmake.py for MSVC compiler
+        #   and are not needed to be used in builder_make.py compiler engine.
+        obj_files = [
+            pair[1].split("/")[-1]
+            for pair in file_pairs
+            if not pair[1].endswith(standalone_obj) and not pair[1].endswith(windll_obj)
+        ]
         obj_files = " ".join(obj_files)
 
         cc = Target.current().cc()
@@ -304,10 +454,40 @@ clean_constants:
 
         cfile_cmd = Target.current().compile_cmd(False).format(target="$@", src="$<")
         bfile_cmd = Target.current().binary_compile_cmd()
+
         if not bfile_cmd:
             bfile_cmd = ""
         else:
             bfile_cmd = bfile_cmd.format(target="$@", src="$<")
+
+        if self._do_trace:
+            cfile_cmd = _augment_for_trace(cfile_cmd)
+            bfile_cmd = _augment_for_trace(bfile_cmd)
+            build_so_cmd = _augment_for_trace(build_so_cmd)
+        else:
+            cfile_cmd = _time_cmd(cfile_cmd)
+            bfile_cmd = _time_cmd(bfile_cmd)
+            build_so_cmd = _time_cmd(build_so_cmd)
+
+        build_exe_cmd = _time_cmd("$(CC) $(CFLAGS) -o $@ $(obj_files)")
+        targets = f"{dll_name}"
+
+        build_standalone_rules = ""
+        if debug_settings.gen_standalone:
+            build_exe_cmd = f"$(CC) $(CFLAGS) -o $@ {standalone_obj} {dll_name}"
+            exe_name = os.path.splitext(dll_name)[0]
+            if is_windows():
+                exe_name += ".exe"
+            exe_target_deps = f"{dll_name} {standalone_obj}"
+            build_standalone_rules = standalone_rules_template.render(
+                standalone_src=standalone_src,
+                standalone_obj=standalone_obj,
+                cfile_cmd=cfile_cmd,
+                exe_target=exe_name,
+                exe_target_deps=exe_target_deps,
+                build_exe_cmd=build_exe_cmd,
+            )
+            targets += f" {exe_name}"
 
         makefile_str = makefile_template.render(
             cc=cc,
@@ -315,9 +495,12 @@ clean_constants:
             CFLAGS=compile_options,
             fPIC=fpic,
             obj_files=obj_files,
-            target=dll_name,
+            dll_target=dll_name,
+            targets=targets,
             cfile_cmd=cfile_cmd,
             bfile_cmd=bfile_cmd,
+            build_so_cmd=build_so_cmd,
+            build_standalone_rules=build_standalone_rules,
         )
 
         dumpfile = os.path.join(workdir, test_name, "Makefile")
@@ -325,50 +508,322 @@ clean_constants:
             # fix the makefile indentation
             f.write(re.sub("^    ", "\t", makefile_str, flags=re.M))
 
+    def postprocess_build_dir(self, workdir: str, test_name: str) -> None:
+        build_dir = os.path.join(workdir, test_name)
+        current_target = None
+        try:
+            current_target: Target = Target.current()
+        except RuntimeError:
+            pass
+        if current_target is not None:
+            current_target.postprocess_build_dir(build_dir)
+
+    @staticmethod
+    def _combine_profiler_multi_sources():
+        """Whether to combine multiple profiler sources per target."""
+        return bool(int(os.environ.get("COMBINE_PROFILER_MULTI_SOURCES", 1)))
+
+    @staticmethod
+    def _force_one_profiler_source_per_target():
+        """Whether to combine multiple profiler sources per target into one."""
+        return bool(int(os.environ.get("FORCE_ONE_PROFILER_SOURCE_PER_TARGET", 0)))
+
+    def _combine_sources(self, sources):
+        """
+        Combine multiple source files (given by path) into one
+        source file and return the path of the combined file.
+
+        Parameters
+        ----------
+        sources : Iterable[str]
+            The list of paths to the source files to combine.
+
+        Returns
+        -------
+        path : str
+            The path to the combined source file.
+        """
+        assert len(sources) > 0, "Must have at least one source"
+        if len(sources) == 1:
+            # no need to combine a single source
+            return next(iter(sources))
+
+        file_lines = []
+        for source in sources:
+            with open(source, "r") as f:
+                lines = f.readlines()
+            for line in lines:
+                if line.strip():
+                    # collect the original non-empty lines
+                    file_lines.append(line)
+            # the last line might not end with "\n"
+            file_lines.append("\n")
+
+        # generate a new file name conditioned on the list of the source file names
+        file_name = sha1((";".join(sorted(sources))).encode("utf-8")).hexdigest()
+        file_dir = Path(next(iter(sources))).parents[0]  # fetch the directory
+        file_path = file_dir / Path(f"temp_{file_name}.cu")
+        with open(file_path, "w") as f:
+            # file_lines end with "\n" already
+            f.write("".join(file_lines))
+
+        # return the path starting with "./"
+        return os.path.join(".", str(file_path))
+
+    def _combine_profiler_sources(self, target_to_sources, num_builders):
+        """
+        Combine multiple profiler sources generated for different targets
+        to optimize the overall compilation time, given the available number
+        of builders (CPUs). The total number of sources (across all targets)
+        is set equal to the `num_builders`. Single-source targets are kept
+        as is; multi-source targetss' sources are possibly combined.
+
+        Simplifying assumptions:
+
+            - Individual split (multiple) sources per target take
+              approximately equal time to compile across different
+              targets (this is, in particular, not true for the main
+              profiler source file vs kernel-specific source files:
+              the former is typically larger than the latter);
+            - Compilation time grows linearly in the number of
+              separate sources combined into a single file.
+
+        Parameters
+        ----------
+        target_to_soruces : dict[str, Iterable[str]]
+            The mapping from each target name to the list of sources
+            required to compile this target. There can be one or more
+            sources for each target.
+        num_builders : int
+            The number of available builders (CPUs).
+
+        Returns
+        ----------
+        target_to_combined_sources : dict[str, Iterable[str]]
+            Like `target_to_sources`, but with some of the source paths
+            in the values replaced by the paths to the respective combined
+            source files. Whether and which of the sources are combined
+            depends on the arguments.
+        """
+        num_total_sources = num_builders
+
+        if (
+            len(target_to_sources) >= num_total_sources
+            or self._force_one_profiler_source_per_target()
+        ):
+            # there are at least as many targets as the total
+            # number of sources required (or single source per
+            # target is forced): combine everything
+            return {
+                target: [self._combine_sources(sources)]
+                for target, sources in target_to_sources.items()
+            }
+
+        combine_candidates = {}  # multi-source targets
+        num_multi_sources, num_single_sources = 0, 0
+        for target, sources in target_to_sources.items():
+            if len(sources) > 1:
+                combine_candidates[target] = sources
+                num_multi_sources += len(sources)
+            else:
+                num_single_sources += 1
+
+        if num_multi_sources == 0:
+            # all targets are single-source: nothing to combine
+            return target_to_sources
+        if num_multi_sources + num_single_sources <= num_total_sources:
+            # there are fewer source files than the total
+            # number of sources required: no need to combine
+            return target_to_sources
+
+        # number of sources we need for the multi-file targets
+        num_combined_sources = num_total_sources - num_single_sources
+        num_sources_per_target = {
+            # the number of combined sources per multi-source target as a
+            # fraction of num_combined_sources is proportional to the number of
+            # multiple sources of the target (rounded down); ultimately, there
+            # should be at least one source target (hence max(..., 1))
+            target: max(int(len(sources) / num_multi_sources * num_combined_sources), 1)
+            for target, sources in combine_candidates.items()
+        }
+
+        # do any sources remain after the above per-target distribution?
+        remaining_sources = num_combined_sources - sum(num_sources_per_target.values())
+        if remaining_sources > 0:
+            # reverse-sort the targets by the remainder after rounding down:
+            # prefer adding sources to the targets with a higher remainder
+            # (i.e. the ones closest to getting another source)
+            targets = sorted(
+                num_sources_per_target.keys(),
+                key=lambda target: (
+                    (
+                        len(target_to_sources[target])
+                        / num_multi_sources
+                        * num_combined_sources
+                    )
+                    - int(
+                        len(target_to_sources[target])
+                        / num_multi_sources
+                        * num_combined_sources
+                    )
+                ),
+                reverse=True,
+            )
+            target_id = 0
+            while remaining_sources > 0:
+                # increment the number of sources for the target
+                num_sources_per_target[targets[target_id]] += 1
+                target_id = (target_id + 1) % len(targets)
+                remaining_sources -= 1
+
+        result = {}
+        for target in target_to_sources:
+            if target in combine_candidates:
+                # collect the sources of the target
+                # in N batches by round robin
+                num_sources = num_sources_per_target[target]
+                # TODO: form the source batches by the total number
+                # of lines instead of the number of sources for more
+                # even distribution of the compilation time per batch
+                batch_id = 0
+                batches = [[] for _ in range(num_sources)]
+                for source in target_to_sources[target]:
+                    batches[batch_id].append(source)
+                    batch_id = (batch_id + 1) % num_sources
+                # conbine the sources in each batch
+                result[target] = [self._combine_sources(b) for b in batches]
+            else:
+                # use the single-source profiler target as is
+                result[target] = target_to_sources[target]
+        return result
+
     def _gen_makefile_for_profilers(self, file_pairs, profiler_dir):
         makefile_template = jinja2.Template(
             """
-programs = {{programs}}
-all: $(programs)
+all: {{targets}}
 .PHONY: all clean
 
-$(programs): %: %.{{cpp}}
-    {{cc_cmd}}
+{{commands}}
 
 clean:
-    rm -f $(programs)
+\trm -f {{targets}}
 """
         )
-        program_relative_paths = sorted(
-            {f[1].split(os.path.join(profiler_dir, ""))[-1] for f in file_pairs}
-        )
-        logger.info(__name__, f"compiling {len(program_relative_paths)} profiler srcs")
-        programs = " ".join(program_relative_paths)
-        cc = Target.current().cc()
-        cpp = "cpp"
-        if "nvcc" in cc:
-            cpp = "cu"
-        cc_cmd = Target.current().compile_cmd(True).format(target="$@", src="$<")
+        # normalize the profiler dir: add / at the end
+        profiler_dir = os.path.join(profiler_dir, "")
+
+        # deduplicate targets from different ops
+        target_to_sources = {}
+        for source, target in file_pairs:
+            if target not in target_to_sources:
+                target_to_sources[target] = set()
+            if isinstance(source, str):
+                target_to_sources[target].add(source)
+            else:
+                target_to_sources[target].update(source)
+
+        # stabilize the order of sources per target
+        target_to_sources = {
+            target: sorted(sources) for target, sources in target_to_sources.items()
+        }
+
+        if self._combine_profiler_multi_sources():
+            num_sources_before = sum(len(s) for s in target_to_sources.values())
+            target_to_sources = self._combine_profiler_sources(
+                target_to_sources=target_to_sources,
+                num_builders=self._n_jobs,
+            )
+            num_sources_after = sum(len(s) for s in target_to_sources.values())
+
+            _LOGGER.info(
+                f"combined {num_sources_before} profiler sources into {num_sources_after}",
+            )
+
+        targets = []
+        dependencies = {}
+        for target, sources in target_to_sources.items():
+            target = target.split(profiler_dir)[-1]
+            if len(sources) == 1:
+                # single-source profiler executable
+                source = next(iter(sources))
+                source = source.split(profiler_dir)[-1]
+                dependencies[target] = [source]
+            else:
+                # multi-source profiler executable
+                objects = []
+                for source in sources:
+                    # first compile the objects
+                    source = source.split(profiler_dir)[-1]
+                    obj = source.replace(".cu", ".obj")
+                    if not os.path.exists(os.path.join(profiler_dir, obj)):
+                        # compile the object only if it is absent
+                        dependencies[obj] = [source]
+                    objects.append(obj)
+                # then link the objects into an executable
+                dependencies[target] = objects
+            targets.append(target)
+
+        commands = []
+        num_compiled_sources = 0
+        target_names = set()
+        for target, srcs in dependencies.items():
+            # for each "target: srcs" pair,
+            # generate two lines for the Makefile
+            src_list = " ".join(srcs)
+            dep_line = f"{target}: {src_list}"
+            cmd_line = (
+                Target.current()
+                .compile_cmd(executable=(not target.endswith(".obj")))
+                .format(target=target, src=src_list)
+            )
+            if self._do_trace:
+                cmd_line = _augment_for_trace(cmd_line)
+            else:
+                cmd_line = _time_cmd(cmd_line)
+
+            command = f"{dep_line}\n\t{cmd_line}\n"
+            commands.append(command)
+
+            # update compilation statistics
+            num_compiled_sources += sum(1 for s in srcs if s.endswith(".cu"))
+            if not target.endswith(".obj"):
+                target_names.add(os.path.split(target)[-1])
+
+        _LOGGER.info(f"compiling {num_compiled_sources} profiler sources")
+        _LOGGER.info(f"linking {len(target_names)} profiler executables")
+
         makefile_str = makefile_template.render(
-            cpp=cpp,
-            programs=programs,
-            cc_cmd=cc_cmd,
+            targets=" ".join(set(targets)),
+            commands="\n".join(commands),
         )
 
-        dumpfile = os.path.join(profiler_dir, "Makefile")
+        # make the Makefile name dependent on the built target names
+        target_names_str = "_".join(sorted(target_names))  # stable order
+        makefile_suffix = sha1(target_names_str.encode("utf-8")).hexdigest()
+        makefile_name = f"Makefile_{makefile_suffix}"
+        dumpfile = os.path.join(profiler_dir, makefile_name)
         with open(dumpfile, "w+") as f:
-            # fix the makefile indentation
-            f.write(re.sub("^    ", "\t", makefile_str, flags=re.M))
+            f.write(makefile_str)
+
+        return makefile_name
 
     def make_profilers(self, generated_profilers, workdir):
         file_pairs = [f for gp in generated_profilers for f in gp]
         if not file_pairs:
             return
         build_dir = shlex.quote(os.path.join(workdir, "profiler"))
-        self._gen_makefile_for_profilers(file_pairs, build_dir)
+        makefile_name = self._gen_makefile_for_profilers(file_pairs, build_dir)
+        # Write compiler version string(s) into build directory, so these can be used as part of cache key
+        self._gen_compiler_version_files(build_dir)
+
+        # hash all .bin files and write hash into it, so we can use their hash to build the cache key,
+        # even if we delete the actual .bin file afterwards
+        write_binhash_file(build_dir)
+
         make_path = shlex.quote(Target.current().make())
         make_flags = " ".join(
             [
+                f"-f {makefile_name}",
                 "--output-sync",
                 f"-C {build_dir}",
             ]
@@ -376,10 +831,66 @@ clean:
         make_clean_cmd = f" {make_path} {make_flags} clean "
         make_all_cmd = f" {make_path} {make_flags} -j{self._n_jobs} all "
         cmds = [make_clean_cmd, make_all_cmd]
-        _run_make_cmds(cmds, self._timeout)
+        _run_make_cmds(
+            cmds,
+            self._timeout,
+            build_dir,
+            allow_cache=(not environ.ait_build_cache_skip_profiler()),
+        )
 
-    def make(self, file_pairs, dll_name, workdir, test_name):
-        self.gen_makefile(file_pairs, dll_name, workdir, test_name)
+    def _gen_compiler_version_files(self, target_dir):
+        # Write compiler version string(s) into build directory
+        # for cache invalidation purposes (different compiler versions
+        # should not reuse same cached build artifacts )
+        cc = Target.current().cc()
+        compilers = {"main_compiler": cc}
+        if "nvcc" in cc:
+            ccbin_match = re.search(r'-ccbin "?([^ "]+)', cc)
+            if ccbin_match:
+                nvcc_host_compiler = ccbin_match.group(1)
+            else:
+                nvcc_host_compiler = "g++"  # default, using PATH resolution
+            compilers["nvcc_host_compiler"] = nvcc_host_compiler
+
+        # Write compiler version string(s)
+        # into the build directory, to enable using them for cache hash determination
+        for compiler_name, compiler_cmd in compilers.items():
+            try:
+                version_bytes = subprocess.check_output([compiler_cmd, "--version"])
+                with open(
+                    os.path.join(target_dir, compiler_name + ".version"),
+                    "wb",  # version_bytes is bytes obj
+                ) as fh:
+                    fh.write(version_bytes)
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                _LOGGER.warn("CACHE: Could not determine version of host compiler.")
+                # This will always invalidate the cache, due to the inclusion of a timestamp
+                with open(
+                    os.path.join(target_dir, compiler_name + ".error.version"),
+                    "w",
+                    encoding="utf-8",
+                ) as fh:
+                    fh.write(f"Could not determine version of {compiler_cmd}\n")
+
+    def make(
+        self,
+        file_pairs,
+        dll_name,
+        workdir,
+        test_name,
+        debug_settings=_DEBUG_SETTINGS,
+        allow_cache=True,
+    ):
+        self.gen_makefile(file_pairs, dll_name, workdir, test_name, debug_settings)
+        self.postprocess_build_dir(workdir, test_name)
+
+        # Write compiler version string(s) into build directory, so these can be used as part of cache key
+        self._gen_compiler_version_files(os.path.join(workdir, test_name))
+
+        # hash all .bin files and write hash into it, so we can use their hash to build the cache key,
+        # even if we delete the actual .bin file afterwards
+        write_binhash_file(os.path.join(workdir, test_name))
+
         make_path = shlex.quote(Target.current().make())
         build_dir = shlex.quote(os.path.join(workdir, test_name))
         make_flags = " ".join(
@@ -392,6 +903,17 @@ clean:
         make_all_cmd = f" {make_path} {make_flags} -j{self._n_jobs} all "
         make_clean_constants_cmd = f" {make_path} {make_flags} clean_constants "
         cmds = [make_clean_cmd, make_all_cmd]
-        if not logger.is_debug():
+        if not is_debug():
             cmds.append(make_clean_constants_cmd)
-        _run_make_cmds(cmds, self._timeout)
+        _run_make_cmds(cmds, self._timeout, build_dir, allow_cache=allow_cache)
+
+
+def get_compile_engine():
+    if is_cmake_compilation():
+        from aitemplate.backend.cuda import builder_cmake
+
+        compile_engine = builder_cmake.BuilderCMake()
+    else:
+        compile_engine = Builder()
+
+    return compile_engine

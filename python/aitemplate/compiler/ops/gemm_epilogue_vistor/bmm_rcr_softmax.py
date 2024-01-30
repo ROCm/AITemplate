@@ -13,16 +13,13 @@
 #  limitations under the License.
 #
 """
-GEMM Specialization for A[RowMajor], B[ColMajor], C[RowMajor]
-This is special in template based gemm solution
-This is used for `torch.nn.functional.linear`
-When use for `linear`, need set A->Data, B->Weight
+Operator definition for bmm_rcr_softmax.
 """
 
-from ...base import IntImm, Tensor
-from ...tensor_accessor import TensorAccessor
-from ..gemm_universal import gemm_common as common
-from ..gemm_universal.bmm import bmm
+from aitemplate.compiler.base import IntImm, Tensor
+from aitemplate.compiler.ops.gemm_universal import gemm_common as common
+from aitemplate.compiler.ops.gemm_universal.bmm import bmm
+from aitemplate.compiler.tensor_accessor import TensorAccessor
 
 # pylint: disable=C0103, W0223, W0221, W0613
 
@@ -36,10 +33,9 @@ class bmm_rcr_softmax(bmm):
     def __init__(self):
         super().__init__()
         self._attrs["op"] = "bmm_rcr_softmax"
-        raise Exception("BMM + Softmax is disabled for now")
 
         def cal_align_ab(m, n, k):
-            return common.default_align_ab(k, k)
+            return common.default_align_ab(k, k, self._attrs["inputs"][0].dtype())
 
         self._attrs["f_ab_alignment"] = cal_align_ab
 
@@ -68,24 +64,13 @@ class bmm_rcr_softmax(bmm):
         output_shape = self._infer_shapes(a, b)
         self._extract_epilogue_alignment(output_shape)
 
-        temp_c = Tensor(output_shape, dst_ops={self})
-        temp_d = Tensor(output_shape, dst_ops={self})
-        temp_n = Tensor(
-            [output_shape[0], output_shape[1], IntImm(1)],
-            dtype="float32",
-            dst_ops={self},
-        )
-
-        self._attrs["inputs"].append(temp_c)
-        self._attrs["inputs"].append(temp_d)
-        self._attrs["inputs"].append(temp_n)
         self._attrs["input_accessors"] = [
             TensorAccessor(tensor) for tensor in self._attrs["inputs"]
         ]
 
         self._set_depth()
 
-        output = Tensor(output_shape, src_ops={self})
+        output = Tensor(output_shape, src_ops={self}, dtype=a._attrs["dtype"])
         self._attrs["outputs"] = [output]
         self._attrs["output_accessors"] = [TensorAccessor(output)]
         return output
@@ -118,7 +103,7 @@ class bmm_rcr_softmax(bmm):
         def fbuild_cmd(exec_key):
             B, M, N, K = self._invert_exec_key(exec_key)
             cmd = []
-            cmd.append(B)  # m
+            cmd.append(B)  # b
             cmd.append(M)  # m
             cmd.append(N)  # n
             cmd.append(K)  # k

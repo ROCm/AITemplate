@@ -15,7 +15,10 @@
 """
 Dump/Read sorted_graph to/from python code.
 """
+import copy
+import logging
 import os
+import sys
 
 from typing import Dict, List, Optional, Tuple, Union
 
@@ -25,6 +28,7 @@ from aitemplate.compiler.base import IntImm, IntVar, IntVarTensor, Operator, Ten
 
 from aitemplate.compiler.transform import mark_param_tensor, name_graph, toposort
 
+_LOGGER = logging.getLogger(__name__)
 PROGRAM_TEMPLATE = jinja2.Template(
     """import numpy as np
 
@@ -211,6 +215,12 @@ def _retrieve_op_info(op: Operator, params_set) -> Tuple[List, Dict]:
         # dynamic slice provides start/end indices as inputs
         op_inputs.append(str(op._attrs["start_indices"]))
         op_inputs.append(str(op._attrs["end_indices"]))
+    elif op._attrs["op"] == "permute":
+        # permute takes permuted dimensions as input,
+        # but can forward to static shape permute ops
+        # that don't (e.g., permute021 or permute102)
+        if "dims" in op._attrs:
+            op_inputs.append(str(op._attrs["dims"]))
 
     return op_inputs, op_attrs
 
@@ -304,6 +314,16 @@ def dump_program(
     """
     if isinstance(sorted_graph, Tensor):
         sorted_graph = [sorted_graph]
+    try:
+        sorted_graph = copy.deepcopy(sorted_graph)
+    except RecursionError:
+        default = sys.getrecursionlimit()
+        new_recursion_limit = default * 10
+        _LOGGER.info(
+            f"Recursion error when copying graph with default recursion limit {default}. Will try again with {new_recursion_limit}"
+        )
+        sys.setrecursionlimit(new_recursion_limit)
+        sorted_graph = copy.deepcopy(sorted_graph)
 
     # Make sure the graph is in correct order and has names and param set correctly.
     sorted_graph = toposort(sorted_graph)
@@ -358,7 +378,9 @@ def dump_program(
     )
 
     if file_path != "":
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        dirs = os.path.dirname(file_path)
+        if dirs != "":
+            os.makedirs(dirs, exist_ok=True)
         with open(file_path, "w") as f:
             f.write(program)
 

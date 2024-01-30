@@ -15,13 +15,19 @@
 """
 ROCM tensor ops module init
 """
-from . import (  # noqa
+from aitemplate.backend.rocm.tensor import (  # noqa
     argmax,
     batch_gather,
     concatenate,
     concatenate_tanh,
     dynamic_slice,
+    expand,
+    expand_static_shape,
+    full,
+    identity,
+    index_select,
     permute021,
+    permute0213,
     permute102,
     permute210,
     slice_reshape_scatter,

@@ -17,7 +17,6 @@ This file contains class definitions used in the generated main.cu file.
 """
 import jinja2
 
-
 MODEL_TEMPLATE = jinja2.Template(
     """
 #pragma once
@@ -28,37 +27,22 @@ MODEL_TEMPLATE = jinja2.Template(
 #include "device_functions-generated.h"
 #include "model_interface.h"
 #include "raii_wrapper.h"
+#include "model.h"
 #include "macros.h"
+#include "jagged.h"
 #include <algorithm>
 #include <deque>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
 #include <string>
 #include <unordered_map>
 #include <math.h>
+#include <iomanip>
 
 {{ function_decl }}
 
-#define CHECK_VECTOR_ACCESS(vector, idx)                                  \\
-  if (idx >= vector.size()) {                                             \\
-    throw std::out_of_range(                                              \\
-        "[__func__]: index out of range, " #vector ".size()=" +           \\
-        std::to_string(vector.size()) + ", got " + std::to_string(idx));  \\
-  }
-
 namespace ait {
-namespace {
-void DeviceCheckLastError(const char* file, int line) {
-  auto device_error = GetLastError();
-  if (device_error != GetDeviceSuccess()) {
-    std::string msg = std::string("Got error: ") + GetLastErrorString() +
-                      " enum: " + std::to_string(device_error) +
-                      " at " + file + ": " + std::to_string(line);
-    LOG(ERROR) << msg;
-    throw std::runtime_error(msg);
-  }
-}
-
-thread_local bool target_has_graph_mode = {{ target_has_graph_mode }};
-} // namespace
 
 // Model is the class that actually performs inference. It owns memory for
 // intermediate tensors and dynamic dimensions. Constants are owned by
@@ -66,305 +50,268 @@ thread_local bool target_has_graph_mode = {{ target_has_graph_mode }};
 // by the user.
 // Once an inference run has started, it is not safe to re-use the Model
 // until the run has finished!
-class Model {
+class {{model_name}} : public ModelBase<{{model_name}}> {
+  {% if n_additional_streams > 0 %}
+  // Extra streams allocated for graph or fork-join streams.
+  static constexpr size_t N_SUB_STREAMS = {{n_additional_streams}};
+  StreamType sub_streams[N_SUB_STREAMS];
+  {% endif %}
+  {% if n_additional_events > 0 %}
+  // Extra events allocated for graph or fork-join streams.
+  static constexpr size_t N_SUB_EVENTS = {{n_additional_events}};
+  EventType sub_events[N_SUB_EVENTS];
+  // An event that guards the fork operation for the base stream.
+  EventType sub_event_base;
+  {% endif %}
+
   public:
-  Model(
-      size_t blob_size,
-      size_t workspace_size,
-      size_t num_inputs,
-      size_t num_outputs,
-      size_t num_unbound_constants,
-      uint8_t* constants,
-      AITemplateAllocator& allocator)
-      : blob_(RAII_DeviceMalloc(blob_size, allocator)),
-        workspace_(RAII_DeviceMalloc(workspace_size, allocator)),
-        params_(num_inputs + num_outputs + num_unbound_constants),
-        num_inputs_(num_inputs),
-        num_outputs_(num_outputs),
-        constants_(constants) {
-      dmlc::InitLogging("aitemplate"); // TODO(xxx): render network name
-      LOG(INFO) << "Init AITemplate Runtime.";
-      global_workspace_ = static_cast<uint8_t*>(workspace_.get()) + {{ unique_workspace_size }};
-      unique_workspace_ = static_cast<uint8_t*>(workspace_.get());
-      DEVICE_CHECK(GetDevice(&device_idx_))
-      DEVICE_CHECK(CreateEvent(&run_finished_));
-#if defined(__NVCC__) || (defined(__clang__) && defined(__CUDA__))
-      DEVICE_CHECK(cudaDeviceGetAttribute(
-        &max_smem_size_, cudaDevAttrMaxSharedMemoryPerBlockOptin, device_idx_));
-#endif
-      DEVICE_CHECK(GetDeviceProperties(&device_properties_, device_idx_));
-      DEVICE_CHECK(StreamCreate(&graph_capture_stream_, /*non_blocking=*/true));
-  InitConstants(constants_);
-      auto* blob_ptr = static_cast<uint8_t*>(blob_.get());
-  {{ tensor_slice }}
-  {{ tensor_map_set }}
+    {{model_name}}(
+        size_t blob_size,
+        size_t workspace_size,
+        size_t unique_workspace_size,
+        size_t num_inputs,
+        size_t num_outputs,
+        size_t num_unbound_constants,
+        uint8_t* constants,
+        AITemplateAllocator& allocator)
+        : ModelBase(
+            blob_size,
+            workspace_size,
+            unique_workspace_size,
+            num_inputs,
+            num_outputs,
+            num_unbound_constants,
+            constants,
+            allocator) {
+    {{ set_up_constants }}
+    auto* blob_ptr = static_cast<uint8_t*>(blob_.get());
+    {{ tensor_slice }}
+    {{ tensor_map_set }}
+    {{ set_up_param_dynamic_shapes }}
+
+      {% if n_additional_streams > 0 %}
+      for (size_t i = 0; i < N_SUB_STREAMS; i++) {
+        DEVICE_CHECK(StreamCreate(sub_streams + i, true));
+      }
+      {% endif %}
+      {% if n_additional_events > 0 %}
+      for (size_t i = 0; i < N_SUB_EVENTS; i++) {
+        DEVICE_CHECK(CreateEvent(sub_events + i, false));
+      }
+      DEVICE_CHECK(CreateEvent(&sub_event_base, false));
+      {% endif %}
     }
 
-    ~Model() {
-      if (run_finished_ != nullptr) {
-        DestroyEvent(run_finished_);
+    ~{{model_name}}() {
+      {% if n_additional_streams > 0 %}
+      for (size_t i = 0; i < N_SUB_STREAMS; i++) {
+        DEVICE_CHECK(StreamDestroy(sub_streams[i]));
       }
-      if (graph_capture_stream_ != nullptr) {
-        StreamDestroy(graph_capture_stream_);
+      {% endif %}
+      {% if n_additional_events > 0 %}
+      for (size_t i = 0; i < N_SUB_EVENTS; i++) {
+        DEVICE_CHECK(DestroyEvent(sub_events[i]));
       }
-      if (graph_exec_ != nullptr) {
-        GraphExecDestroy(graph_exec_);
-      }
+      DEVICE_CHECK(DestroyEvent(sub_event_base));
+      {% endif %}
     }
-
-    Model(Model&& other) {
-      run_finished_ = other.run_finished_;
-      graph_exec_ = other.graph_exec_;
-      graph_capture_stream_ = other.graph_capture_stream_;
-      other.run_finished_ = nullptr;
-      other.graph_exec_ = nullptr;
-      other.graph_capture_stream_ = nullptr;
-
-      constants_ = other.constants_;
-      num_inputs_ = other.num_inputs_;
-      global_workspace_ = other.global_workspace_;
-      unique_workspace_ = other.unique_workspace_;
-      workspace_ = std::move(other.workspace_);
-
-      params_ = std::move(other.params_);
-      constant_name_to_ptr_ = std::move(other.constant_name_to_ptr_);
-      // Re-wire the pointers in the above 2 structures.
-      InitConstants(constants_);
-    }
-
-    Model& operator=(Model&&) = delete;
-    Model(const Model&) = delete;
-    Model& operator=(const Model&) = delete;
 
     void SetUpInputsOutputs() {
         {{ set_inputs }}
     }
 
+    void ResetConstants(uint8_t* constants) {
+        /*
+         * This can be called if we want to use a different piece of memory
+         * for the constants to be consumed.
+         */
+        {{ reset_constants }}
+    }
+
     void DeviceToDeviceCopies(StreamType stream) {
   {{ device_to_device_copies }}
     }
-    void Run(StreamType stream, bool graph_mode) {
-      SetUpInputsOutputs();
-      if (target_has_graph_mode && graph_mode) {
-        RunAsGraph(stream);
-      } else {
-        RunImpl(stream);
-      }
-      DEVICE_CHECK(EventRecord(run_finished_, stream));
-    }
 
+{% if run_impl_mode == 0 %}
+    ///////////////////////////////////////////////////////////////////////////
+    // default RunImpl implemenation
     void RunImpl(StreamType stream) {
+        {% if profiler_annotation %}
+        RAII_ProfilerRange _raiiAITProfilerRange("main_start");
+        {% endif %}
   {% for func in function_seq %}
   {{ func }}
       DeviceCheckLastError(__FILE__, __LINE__);
   {% endfor %}
+    }
+{% endif %}
+
+{% if run_impl_mode == 1 %}
+    ///////////////////////////////////////////////////////////////////////////
+    // simple multistream implementation
+    void RunImpl(StreamType baseStream) {
+      {% if profiler_annotation %}
+      RAII_ProfilerRange _raiiAITProfilerRange("main_start");
+      {% endif %}
+
+      {% for funcs in par_function_seq %}
+        {% if funcs|length == 1 %}
+          // do no parallel stream processing here
+          {
+            uint8_t* global_workspace_ = this->global_workspace_;
+            uint8_t* unique_workspace_ = this->unique_workspace_;
+
+            StreamType& stream = baseStream;
+            {{ funcs[0] }}
+            DeviceCheckLastError(__FILE__, __LINE__);
+          }
+        {% else %}
+          // do parallel stream processing here
+          // first function runs on the base stream, others are on extra ones.
+          // it is assumed that functions are independent.
+          {
+            // baseStream fork guard
+            DEVICE_CHECK(EventRecord(sub_event_base, baseStream));
+
+            // every substream forks
+            for (size_t i = 0; i < {{ n_additional_streams if funcs|length > n_additional_streams else funcs|length - 1 }}; i++) {
+              StreamType& stream = sub_streams[i];
+              DEVICE_CHECK(StreamWaitEvent(stream, sub_event_base));
+            }
+
+            // run kernels
+            // note that every stream may run spawn multiple kernel runs
+            {% for func in funcs %}
+              {% if (loop.index - 1) % (n_additional_streams + 1) == 0 %}
+                {
+                  uint8_t* global_workspace_ = this->global_workspace_;
+                  uint8_t* unique_workspace_ = this->unique_workspace_;
+
+                  StreamType& stream = baseStream;
+                  {{ func }}
+                  DeviceCheckLastError(__FILE__, __LINE__);
+                }
+              {% else %}
+                {
+                  uint8_t* global_workspace_ = this->global_workspace_ + this->workspace_size_ / {{1 + n_additional_events}} * {{ ((loop.index - 1) % (n_additional_streams + 1)) }};
+                  uint8_t* unique_workspace_ = this->unique_workspace_ + this->unique_workspace_size_ / {{1 + n_additional_events}} * {{ ((loop.index - 1) % (n_additional_streams + 1)) }};
+
+                  StreamType& stream = sub_streams[{{ ((loop.index - 1) % (n_additional_streams + 1)) - 1}}];
+                  {{ func }}
+                  DeviceCheckLastError(__FILE__, __LINE__);
+                }
+              {% endif %}
+            {% endfor %}
+
+            // substream join guards
+            for (size_t i = 0; i < {{ n_additional_streams if funcs|length > n_additional_streams else funcs|length - 1 }}; i++) {
+              DEVICE_CHECK(EventRecord(sub_events[i], sub_streams[i]));
+            }
+            // base stream joins
+            for (size_t i = 0; i < {{ n_additional_streams if funcs|length > n_additional_streams else funcs|length - 1 }}; i++) {
+              DEVICE_CHECK(StreamWaitEvent(baseStream, sub_events[i]));
+            }
+          }
+        {% endif %}
+      {% endfor %}
+
+      {
+        // run various checks, if needed
+        StreamType& stream = baseStream;
+        {% for func in par_check_function_seq %}
+          {{ func }}
+          DeviceCheckLastError(__FILE__, __LINE__);
+        {% endfor %}
+      }
+    }
+{% endif %}
+
+    void ProfileImpl(StreamType stream, size_t iters, const std::string& filename) {
+#ifdef OPTIMIZE_FOR_COMPILATION_TIME
+      throw std::runtime_error("Profile is disabled, please recompile without OPTIMIZE_FOR_COMPILE_TIME flag");
+#else
+      std::ofstream ss(filename);
+      if (!ss) {
+        throw std::runtime_error(std::string("Could not open file ") + filename);
+      }
+
+      int deviceId;
+      char* L2CacheSlab = nullptr;
+      DevicePropertyType deviceProperties;
+      GetDevice(&deviceId);
+      GetDeviceProperties(&deviceProperties, deviceId);
+      const size_t L2SizeInBytes = deviceProperties.l2CacheSize;
+      DeviceMalloc((void**) &L2CacheSlab, L2SizeInBytes);
+
+      ss << "{\\n";
+      {% for func_name, func, input_sizes, output_sizes, func_properties in per_op_profiler_seq %}
+      {
+        std::cout << "Profiling: " << "{{ func_name }}" << " (" << iters << " iterations)" << std::endl;
+        std::vector<std::pair<EventType, EventType>> call_events(iters);
+        for (auto& [call_start, call_end] : call_events) {
+          CreateEvent(&call_start);
+          CreateEvent(&call_end);
+        }
+        for (auto& [call_start, call_end] : call_events) {
+          DeviceMemset(L2CacheSlab, 0x73, L2SizeInBytes);
+          EventRecord(call_start, stream);
+            {{ func }}
+          EventRecord(call_end, stream);
+          DeviceCheckLastError(__FILE__, __LINE__);
+        }
+        EventSynchronize(std::get<1>(call_events.back()));
+        float milliseconds = 0.0;
+        for (auto& [call_start, call_end] : call_events) {
+          float call_milliseconds = 0.0;
+          EventElapsedTime(&call_milliseconds, call_start, call_end);
+          DestroyEvent(call_start);
+          DestroyEvent(call_end);
+          milliseconds += call_milliseconds;
+        }
+        ss << "\\"" << "{{ func_name }}" << "\\": { \\"ms_per_iter\\": "
+           << std::setprecision(4) << (milliseconds/iters)
+           << ", \\"qps\\": " << 1000 * iters / milliseconds
+           << ", \\"input_sizes\\": " << "{{ input_sizes | replace("'", '\\\\"') }}"
+           << ", \\"output_sizes\\": " << "{{ output_sizes | replace("'", '\\\\"') }}"
+        {% for prop_name, prop_value in func_properties.items() %}
+          << ", \\"{{ prop_name }}\\": " << "\\"{{ prop_value }}\\""
+        {% endfor %}
+           << " } ";
+        {% if loop.last %}
+          ss << "\\n";
+        {% else %}
+          ss << ",\\n";
+        {% endif %}
+      }
+      {% endfor %}
+      ss << "}\\n";
+
       DeviceToDeviceCopies(stream);
+      std::cout << "AIT per op profiling finished." << std::endl;
+      FreeDeviceMemory(L2CacheSlab);
+#endif
     }
 
-    bool IsPending() {
-      auto query = QueryEvent(run_finished_);
-      if (query == GetDeviceNotReady()) {
-        return true;
-      }
-      if (query != GetDeviceSuccess()) {
-        LOG(WARNING) << "Pending model run did not finish successfully. Error: "
-                    << GetErrorString(query);
-      }
-      return false;
-    }
-
-    void WaitForCompletion() {
-      DEVICE_CHECK(EventSynchronize(run_finished_));
-    }
-
-    size_t NumInputs() const {
-      return num_inputs_;
-    }
-
-    size_t NumOutputs() const {
-      return num_outputs_;
-    }
-
-    void SetParam(const void* src, size_t param_idx) {
-      CHECK_VECTOR_ACCESS(params_, param_idx)
-      // const_cast is not ideal here, but it is unfortunately
-      // necessary:
-      // 1) We store outputs and inputs in the same vector,
-      //    and outputs cannot be const.
-      // 2) Most of the codegen is not const-correct (most ops
-      //    require non-const pointers). So even if we put const
-      //    pointers into params, a const_cast would be required
-      //    somewhere else.
-      params_[param_idx].ptr = const_cast<void*>(src);
-    }
-
-    void SetInput(const void* src, const AITemplateParamShape& shape, size_t idx) {
-      SetInputShape(shape, idx);
-      SetParam(src, idx);
-    }
-
-    void SetOutput(void* src, size_t idx) {
-      SetParam(src, idx + num_inputs_);
-    }
-
-    // Write the (possibly dynamic) output shape to the given pointer.
-    // Note that this should be called _after_ the shape inference in
-    // Run() is finished. output_shape_out should be able to store
-    // at least GetOutputMaximumShape(idx).size values.
-    void GetOutputShape(size_t idx, int64_t* output_shape_out) {
-      const auto param_idx = idx + num_inputs_;
-      CHECK_VECTOR_ACCESS(params_, param_idx);
-      const auto& shape_ptrs = params_[param_idx].shape_ptrs;
-      for (size_t i = 0; i < shape_ptrs.size(); ++i) {
-        output_shape_out[i] = shape_ptrs[i].GetValue();
-      }
-    }
-
-    void SetConstant(const char* name, const void* src) {
-      auto it = constant_name_to_ptr_.find(name);
-      if (it == constant_name_to_ptr_.end()) {
-        throw std::out_of_range(std::string("Could not find constant ") + name);
-      }
-      const void** ptr = it->second;
-      *ptr = src;
+    static std::unique_ptr<{{model_name}}> Create(
+      AITemplateAllocator& allocator,
+      uint8_t* constants
+    ) {
+      return std::make_unique<{{model_name}}>(
+          {{ blob_size }},
+          {{ workspace_size }} * (1 + {{n_additional_streams}}),
+          {{ unique_workspace_size }} * (1 + {{n_additional_streams}}),
+          {{ num_inputs }},
+          {{ num_outputs }},
+          {{ num_unbound_constants }},
+          constants,
+          allocator
+      );
     }
 
   private:
-    void InitConstants(uint8_t* constants) {
-      {{ set_up_constants }}
-      {{ set_up_param_dynamic_shapes }}
-    }
-
-    void SetInputShape(const AITemplateParamShape& shape, size_t idx) {
-      auto& param = params_[idx];
-      if (shape.size != param.shape_ptrs.size()) {
-        throw std::runtime_error(
-          "[SetInputShape] Got wrong param shape for input " + std::to_string(idx) +
-          "; expected " + std::to_string(param.shape_ptrs.size()) + ", got " +
-          std::to_string(shape.size));
-      }
-      for (size_t i = 0; i < param.shape_ptrs.size(); ++i) {
-        param.shape_ptrs[i].SetValue(shape.shape_data[i]);
-      }
-    }
-
-    DeviceError EndCapture(GraphType* graph_ptr) {
-      auto err = StreamEndCapture(graph_capture_stream_, graph_ptr);
-      if (err != GetDeviceSuccess()) {
-        // If we can't take the stream out of capture mode, something is probably
-        // wrong with CUDA graph for this model (e.g. there might have been an
-        // illegal capture mode operation). Disable graph mode to avoid such issues
-        // in future iterations.
-        target_has_graph_mode = false;
-        LOG(WARNING) << "Graph capture failed to end. Disabling graph mode.";
-        return err;
-      }
-      return GetDeviceSuccess();
-    }
-
-    void RunAsGraph(StreamType stream) {
-      DEVICE_CHECK(StreamBeginCapture(graph_capture_stream_, /*global=*/false));
-      try {
-        RunImpl(graph_capture_stream_);
-      } catch (...) {
-        GraphType graph;
-        // No need to DEVICE_CHECK here, we want to see the original exception.
-        EndCapture(&graph);
-        if (graph != nullptr && GraphDestroy(graph) != GetDeviceSuccess()) {
-          LOG(WARNING) << "Graph destruction failed while handling exception! Memory will be leaked.";
-        }
-        throw;
-      }
-
-      // The following function ends the capture and creates a graph
-      // inside a unique_ptr that cleans up it when it goes out of scope.
-      // Note that it throws an exception if EndCapture fails.
-      auto graph = RAII_EndCaptureAndCreateGraph(
-        [this](GraphType* graph_ptr){ return EndCapture(graph_ptr); }
-      );
-
-      if (graph_exec_ == nullptr) {
-        DEVICE_CHECK(GraphInstantiate(&graph_exec_, graph.get()));
-      } else if (GraphExecUpdate(graph_exec_, graph.get()) != GetDeviceSuccess()) {
-        // Consume the last cuda error, which may affect the next GraphExecLaunch
-        // call.
-        GetLastError();
-        DEVICE_CHECK(GraphExecDestroy(graph_exec_));
-        DEVICE_CHECK(GraphInstantiate(&graph_exec_, graph.get()));
-      }
-
-      DEVICE_CHECK(GraphExecLaunch(graph_exec_, stream));
-    }
-
-    int device_idx_;
-    int max_smem_size_{0};
-    DevicePropertyType device_properties_;
-    // This event tracks when the inference is finished
-    // so that this Model may be reclaimed by its owning
-    // ModelContainer.
-    EventType run_finished_;
-    // A blob of memory used for storing intermediate tensors.
-    GPUPtr blob_;
-    // Memory for constants that were folded into the *.so. Unowned by Model,
-    // owned by ModelContainer.
-    // TODO: make this const. It can't be const right now because we derive
-    // tensor pointers from it, and no tensor pointers are const.
-    uint8_t* constants_;
-    size_t num_inputs_;
-    size_t num_outputs_;
-
-    // The workspace blob is used as scratch memory. See
-    // _generate_workspace in memory planning for more information.
-    GPUPtr workspace_;
-    uint8_t* global_workspace_{nullptr};
-    uint8_t* unique_workspace_{nullptr};
-
-    class ParamDim {
-      public:
-        ParamDim(int64_t lower_bound, int64_t upper_bound, int64_t* value) :
-          lower_bound_(lower_bound),
-          upper_bound_(upper_bound),
-          value_(value) {}
-
-        void SetValue(int64_t new_value) {
-          if (new_value < lower_bound_ || new_value > upper_bound_) {
-            throw std::out_of_range(
-              "[SetValue] Dimension got value out of bounds; expected value to be in [" +
-              std::to_string(lower_bound_) + ", " + std::to_string(upper_bound_) + "], but got " +
-              std::to_string(new_value)
-            );
-          }
-          *value_ = new_value;
-        }
-
-        int64_t GetValue() const {
-          return *value_;
-        }
-
-      private:
-        int64_t lower_bound_;
-        int64_t upper_bound_;
-        int64_t* value_;
-    };
-
-    struct ParamInfo {
-      void* ptr = nullptr;
-      // TODO add offset
-      const char* name;
-      std::vector<ParamDim> shape_ptrs;
-    };
-
-    // Contains info for all tensors marked as inputs
-    // or outputs. The first num_inputs elements are the inputs.
-    // Constants are not included.
-    std::vector<ParamInfo> params_;
-
-    GraphExecType graph_exec_ = nullptr;
-    StreamType graph_capture_stream_;
-
-    std::unordered_map<std::string, const void**> constant_name_to_ptr_;
 {{ tensor_decl }}
 {{ dim_decl }}
+{{ jagged_decl }}
 {{ function_state }}
 };
 } // namespace ait
@@ -378,6 +325,11 @@ MODEL_CONTAINER_TEMPLATE = jinja2.Template(
 
 namespace ait {
 namespace {
+
+{% if is_windows %}
+#include "windll.h"
+{% endif %}
+
 // Contains the metadata for each constant.
 constexpr std::array<ConstantInfo, {{ num_constants }}> owned_constants = {
   {{ owned_constants_init }}
@@ -387,10 +339,17 @@ constexpr std::array<ConstantInfo, {{ num_constants }}> owned_constants = {
 ModelContainerBase::ModelContainerBase(
     size_t num_inputs,
     size_t num_outputs,
+    size_t num_bound_constants,
     size_t num_unbound_constants,
     size_t params_size,
     AITemplateAllocator& allocator)
-    : constants_(RAII_DeviceMalloc(params_size, allocator)),
+    : constants_size_(params_size),
+      constants_primary_(RAII_DeviceMalloc(constants_size_, allocator)),
+      constants_secondary_(nullptr),
+      use_constants_primary_buffer_(true),
+      buffer_state_(BufferState::CLEAN),
+      bound_constant_size_(num_bound_constants),
+      bound_constant_dtypes_(num_bound_constants),
       num_params_(num_inputs + num_outputs + num_unbound_constants),
       param_names_(num_params_),
       param_dtypes_(num_params_),
@@ -400,6 +359,8 @@ ModelContainerBase::ModelContainerBase(
 {{ set_up_constant_names }}
 {{ set_up_param_names }}
 {{ set_up_param_dtypes }}
+{{ set_up_bound_constant_dtypes }}
+{{ set_up_bound_constant_size }}
 {{ set_up_output_shapes }}
   for (size_t i = 0; i < num_params_; ++i) {
     max_param_numel_[i] = std::accumulate(
@@ -410,21 +371,31 @@ ModelContainerBase::ModelContainerBase(
     );
     max_param_storage_bytes_[i] = max_param_numel_[i] * AITemplateDtypeSizeBytes(param_dtypes_[i]);
   }
+{{ set_up_constant_offsets }}
+{{ set_up_constant_folding_inputs }}
 
-  auto* constants_ptr = static_cast<uint8_t*>(constants_.get());
+{% if is_windows %}
+  size_t binary_constants_bin_size = 0;
+  uint8_t* binary_constants_bin_start = nullptr;
+  GetConstantsBin((void**)&binary_constants_bin_start, &binary_constants_bin_size);
+{% else %}
   const auto binary_constants_bin_size = static_cast<size_t>(_binary_constants_bin_end - _binary_constants_bin_start);
+  const uint8_t* const binary_constants_bin_start = _binary_constants_bin_start;
+{% endif %}
+
+  auto* constants_ptr = static_cast<uint8_t*>(constants_primary_.get());
   for (auto& constant_info : owned_constants) {
     auto* dst = constants_ptr + constant_info.internal_offset;
     if (constant_info.data_offset + constant_info.num_bytes > binary_constants_bin_size) {
       throw std::runtime_error(std::string("Copying constant ") + constant_info.name + " would overflow constant buffer");
     }
-    DEVICE_CHECK(CopyToDevice(dst, _binary_constants_bin_start + constant_info.data_offset, constant_info.num_bytes));
+    DEVICE_CHECK(CopyToDevice(dst, binary_constants_bin_start + constant_info.data_offset, constant_info.num_bytes));
   }
 }
 
 ModelContainer* CreateModelContainer(size_t num_runtimes, AITemplateAllocator& allocator) {
-  // num_runtimes, blob_size, workspace_size, num_inputs, num_outputs, num_unbound_constants, param_size, allocator
-  return new ModelContainer(num_runtimes, {{blob_size}}, {{workspace_size}}, {{num_inputs}}, {{num_outputs}}, {{num_unbound_constants}}, {{param_size}}, allocator);
+  // num_runtimes, num_inputs, num_outputs, num_bound_constants, num_unbound_constants, params_size, allocator
+  return new ModelContainer(num_runtimes, {{num_inputs}}, {{num_outputs}}, {{num_bound_constants}}, {{num_unbound_constants}}, {{param_size}}, allocator);
 }
 } // namespace ait
 """

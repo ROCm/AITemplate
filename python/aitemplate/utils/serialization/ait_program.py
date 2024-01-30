@@ -23,6 +23,7 @@ from aitemplate.compiler.base import (
     _TorchConstantTensorData,
 )
 from aitemplate.frontend import IntVar, Tensor
+from aitemplate.testing.test_utils import get_random_torch_tensor
 
 
 def convert_to_ait_const(const):
@@ -65,26 +66,26 @@ class AITBasicProgram:
         for k, v in constants.items():
             getattr(self, k)._bind_data(convert_to_ait_const(v))
 
-    def set_default_constants(self):
+    def set_default_constants(self, dtype="float16"):
         """
         This function is called to set up default constants
         (ex. constant folded/constants set up by zero padding etc.).
         """
-        self.set_all_random_constants()
+        self.set_all_random_constants(dtype)
 
-    def set_all_random_constants(self):
+    def set_all_random_constants(self, dtype="float16"):
         """
         This function would set all constants into random value.
         """
         const_infos = self.get_constants()
         for k, v in const_infos.items():
             getattr(self, k)._bind_data(
-                _NumpyConstantTensorData(np.random.randn(*v).astype("float16"))
+                _TorchConstantTensorData(get_random_torch_tensor(v, dtype))
             )
 
     def model(self) -> Union[Tensor, Tuple[Tensor]]:
         """
         This function defines the AIT program.
-        Returns a output tensor, or a tuple of output tensors.
+        Returns an output tensor, or a tuple of output tensors.
         """
         pass

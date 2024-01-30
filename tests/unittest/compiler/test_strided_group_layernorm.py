@@ -14,14 +14,17 @@
 #
 import itertools
 import unittest
-import uuid
 from typing import List
 
 import torch
 from aitemplate.compiler import compile_model, ops
-from aitemplate.frontend import Tensor
+from aitemplate.frontend import IntImm, IntVar, Tensor
 from aitemplate.testing import detect_target
-from aitemplate.utils import shape_utils
+from aitemplate.testing.test_utils import (
+    get_random_torch_tensor,
+    get_torch_empty_tensor,
+)
+from aitemplate.utils import shape_utils, torch_utils
 
 
 def build_ait_module(
@@ -35,9 +38,10 @@ def build_ait_module(
     beta_is_none,
     fuse_sigmoid_mul,
     eps,
+    test_id,
     ait_dtype="float16",
     workdir="./tmp",
-    test_name="slice_group_layernorm",
+    test_name="strided_group_layernorm",
 ):
     target = detect_target()
     inputs = [
@@ -84,11 +88,13 @@ def build_ait_module(
     for i, output in enumerate(outputs):
         output._attrs["is_output"] = True
         output._attrs["name"] = f"output_{i}"
+    dll_name = f"test_{test_id}.so"
     return compile_model(
         outputs,
         target,
         workdir,
         test_name,
+        dll_name=dll_name,
     )
 
 
@@ -164,6 +170,10 @@ def eval_pt(
 
 
 class SliceGroupLayerNormTestCase(unittest.TestCase):
+    def __init__(self, *args, **kwargs):
+        super(SliceGroupLayerNormTestCase, self).__init__(*args, **kwargs)
+        self._test_id = 0
+
     def _test_slice_group_layer_norm(
         self,
         *,
@@ -176,6 +186,7 @@ class SliceGroupLayerNormTestCase(unittest.TestCase):
         eps=1e-5,
         start_indices: List[int] = (0,),
         end_indices: List[int] = (None,),
+        dtype: str = "float16",
     ):
         input_rank = 1 + len(input_nonbatch_shapes[0])
         if 1 == len(start_indices) and len(start_indices) != input_rank:
@@ -196,13 +207,15 @@ class SliceGroupLayerNormTestCase(unittest.TestCase):
 
         ait_module = build_ait_module(
             batch_sizes=batch_sizes,
-            workdir=uuid.uuid4().hex,
             **_layernorm_common_params,
+            test_id=self._test_id,
+            ait_dtype=dtype,
         )
+        self._test_id += 1
+        pt_dtype = torch_utils.string_to_torch_dtype(dtype)
         for batch_size in batch_sizes:
             pt_tensors = eval_pt(
-                batch_size=batch_size,
-                **_layernorm_common_params,
+                batch_size=batch_size, **_layernorm_common_params, dtype=pt_dtype
             )
             ait_inputs = {
                 k: v
@@ -328,6 +341,175 @@ class SliceGroupLayerNormTestCase(unittest.TestCase):
                 beta_is_none=beta_is_none,
                 fuse_sigmoid_mul=True,
             )
+
+    @unittest.skipIf(detect_target().name() == "rocm", "Not supported by ROCM.")
+    def test_slice_group_layer_norm_float(self):
+        self._test_slice_group_layer_norm_kernels(
+            n_normalize_over_last_dims=3,
+            gamma_is_none=True,
+            beta_is_none=True,
+            fuse_sigmoid_mul=False,
+            dtype="float32",
+        )
+        self._test_middle_slice_group_layer_norm_kernels(
+            n_normalize_over_last_dims=2,
+            gamma_is_none=True,
+            beta_is_none=False,
+            fuse_sigmoid_mul=False,
+            dtype="float32",
+        )
+        self._test_slice_group_layer_norm_kernels(
+            n_normalize_over_last_dims=1,
+            gamma_is_none=False,
+            beta_is_none=True,
+            fuse_sigmoid_mul=True,
+            dtype="float32",
+        )
+        self._test_middle_slice_group_layer_norm_kernels(
+            n_normalize_over_last_dims=3,
+            gamma_is_none=False,
+            beta_is_none=False,
+            fuse_sigmoid_mul=True,
+            dtype="float32",
+        )
+
+    @unittest.skipIf(detect_target().name() == "rocm", "Not supported by ROCM.")
+    def test_group_layernorm_no_cuda_illegal_memory_access(self):
+        """
+        This subgraph has led to CUDA illegal memory issues before.
+        Adding it as a unit test to ensure there are no regressions.
+        """
+        batch_size = IntVar(values=[1, 2048], name="batch_size")
+
+        unsqueeze_46_0 = Tensor(
+            shape=[batch_size, 7680, 1],
+            is_input=True,
+            name="unsqueeze_46_0",
+        )
+        unsqueeze_58_0 = Tensor(
+            shape=[batch_size, 7680, 1],
+            is_input=True,
+            name="unsqueeze_58_0",
+        )
+        unsqueeze_70_0 = Tensor(
+            shape=[batch_size, 7680, 1],
+            is_input=True,
+            name="unsqueeze_70_0",
+        )
+        unsqueeze_131_0 = Tensor(
+            shape=[batch_size, 3, 1],
+            is_input=True,
+            name="unsqueeze_131_0",
+        )
+        main_module_base_forward_module_over_arch_bottom_arch_list_1_dime_shared_arch_layer_norm__norm_weight = Tensor(
+            shape=[IntImm(256)],
+            is_input=True,
+            name="main_module_base_forward_module_over_arch_bottom_arch_list_1_dime_shared_arch_layer_norm__norm_weight",
+        )
+        main_module_base_forward_module_over_arch_bottom_arch_list_1_dime_shared_arch_layer_norm__norm_bias = Tensor(
+            shape=[IntImm(256)],
+            is_input=True,
+            name="main_module_base_forward_module_over_arch_bottom_arch_list_1_dime_shared_arch_layer_norm__norm_bias",
+        )
+
+        unsqueeze_83_0 = Tensor(
+            shape=[batch_size, 7680, 1],
+            is_input=True,
+            name="unsqueeze_83_0",
+        )
+        unsqueeze_95_0 = Tensor(
+            shape=[batch_size, 7680, 1],
+            is_input=True,
+            name="unsqueeze_95_0",
+        )
+        unsqueeze_107_0 = Tensor(
+            shape=[batch_size, 7680, 1],
+            is_input=True,
+            name="unsqueeze_107_0",
+        )
+        unsqueeze_358_0 = Tensor(
+            shape=[batch_size, 3, 1],
+            is_input=True,
+            name="unsqueeze_358_0",
+        )
+        main_module_base_forward_module_over_arch_bottom_arch_list_0_dime_shared_arch_layer_norm__norm_weight = Tensor(
+            shape=[IntImm(256)],
+            is_input=True,
+            name="main_module_base_forward_module_over_arch_bottom_arch_list_0_dime_shared_arch_layer_norm__norm_weight",
+        )
+        main_module_base_forward_module_over_arch_bottom_arch_list_0_dime_shared_arch_layer_norm__norm_bias = Tensor(
+            shape=[IntImm(256)],
+            is_input=True,
+            name="main_module_base_forward_module_over_arch_bottom_arch_list_0_dime_shared_arch_layer_norm__norm_bias",
+        )
+
+        concatenate_71_0 = ops.concatenate()(
+            inputs=[unsqueeze_46_0, unsqueeze_58_0, unsqueeze_70_0],
+            dim=2,
+        )
+        bmm_rrr_132_0 = ops.bmm_rrr()(concatenate_71_0, unsqueeze_131_0)
+        reshape_133_0 = ops.reshape()(bmm_rrr_132_0, shape=[-1, 30, 256])
+        layernorm_134_0 = ops.layernorm(normalized_shape=[IntImm(256)])(
+            reshape_133_0,
+            main_module_base_forward_module_over_arch_bottom_arch_list_1_dime_shared_arch_layer_norm__norm_weight,
+            main_module_base_forward_module_over_arch_bottom_arch_list_1_dime_shared_arch_layer_norm__norm_bias,
+        )
+        permute021_136_0 = ops.permute021()(layernorm_134_0)
+
+        concatenate_108_0 = ops.concatenate()(
+            inputs=[unsqueeze_83_0, unsqueeze_95_0, unsqueeze_107_0],
+            dim=2,
+        )
+        bmm_rrr_359_0 = ops.bmm_rrr()(concatenate_108_0, unsqueeze_358_0)
+        reshape_360_0 = ops.reshape()(bmm_rrr_359_0, shape=[-1, 30, 256])
+        layernorm_361_0 = ops.layernorm(normalized_shape=[IntImm(256)])(
+            reshape_360_0,
+            main_module_base_forward_module_over_arch_bottom_arch_list_0_dime_shared_arch_layer_norm__norm_weight,
+            main_module_base_forward_module_over_arch_bottom_arch_list_0_dime_shared_arch_layer_norm__norm_bias,
+        )
+        permute021_363_0 = ops.permute021()(layernorm_361_0)
+
+        outputs = [permute021_136_0, permute021_363_0]
+
+        for i, output in enumerate(outputs):
+            output._attrs["is_output"] = True
+            output._attrs["name"] = f"output_{i}"
+
+        model = compile_model(
+            outputs,
+            detect_target(),
+            "./tmp",
+            "test_group_layernorm_repro",
+        )
+
+        pt_inputs = {
+            "unsqueeze_46_0": get_random_torch_tensor(shape=[1024, 7680, 1]),
+            "unsqueeze_58_0": get_random_torch_tensor(shape=[1024, 7680, 1]),
+            "unsqueeze_70_0": get_random_torch_tensor(shape=[1024, 7680, 1]),
+            "unsqueeze_131_0": get_random_torch_tensor(shape=[1024, 3, 1]),
+            "main_module_base_forward_module_over_arch_bottom_arch_list_1_dime_shared_arch_layer_norm__norm_weight": get_random_torch_tensor(
+                shape=[256]
+            ),
+            "main_module_base_forward_module_over_arch_bottom_arch_list_1_dime_shared_arch_layer_norm__norm_bias": get_random_torch_tensor(
+                shape=[256]
+            ),
+            "unsqueeze_83_0": get_random_torch_tensor(shape=[1024, 7680, 1]),
+            "unsqueeze_95_0": get_random_torch_tensor(shape=[1024, 7680, 1]),
+            "unsqueeze_107_0": get_random_torch_tensor(shape=[1024, 7680, 1]),
+            "unsqueeze_358_0": get_random_torch_tensor(shape=[1024, 3, 1]),
+            "main_module_base_forward_module_over_arch_bottom_arch_list_0_dime_shared_arch_layer_norm__norm_weight": get_random_torch_tensor(
+                shape=[256]
+            ),
+            "main_module_base_forward_module_over_arch_bottom_arch_list_0_dime_shared_arch_layer_norm__norm_bias": get_random_torch_tensor(
+                shape=[256]
+            ),
+        }
+        pt_outputs = {
+            "output_0": get_torch_empty_tensor(shape=[1024, 256, 30]),
+            "output_1": get_torch_empty_tensor(shape=[1024, 256, 30]),
+        }
+
+        model.run_with_tensors(pt_inputs, pt_outputs)
 
 
 if __name__ == "__main__":

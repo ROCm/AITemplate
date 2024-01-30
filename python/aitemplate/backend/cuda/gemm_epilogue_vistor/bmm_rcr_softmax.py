@@ -20,10 +20,13 @@ When use for `linear`, need set A->Data, B->Weight
 """
 import jinja2
 
-from ... import registry
-from ..gemm_universal import common
-from ..gemm_universal.layout import RCR
-from . import bmm_common_softmax as bmm_common, common_softmax
+from aitemplate.backend import registry
+from aitemplate.backend.cuda.gemm_epilogue_vistor import (
+    common_softmax,
+    gemm_rcr_softmax,
+)
+from aitemplate.backend.cuda.gemm_universal import common
+from aitemplate.backend.cuda.gemm_universal.layout import RCR
 
 # pylint: disable=C0103,C0415,W0613,C0301,R1705,R1703
 
@@ -50,65 +53,61 @@ ARGS_PARSER_TEMPLATE = jinja2.Template(
 PROBLEM_ARGS_TEMPLATE = jinja2.Template(
     """
     /*
-        A: B*M*K (RowMajor)
-        B: B*N*K (ColumnMajor)
-        C/D/sofmax: B*M*N (RowMajor)
-        N: B*M*1 (RowMajor)
+        A: (B, M, K) (RowMajor)
+        B: (B, N, K) (ColumnMajor)
+        C, D, Soft: (B, M, N) (RowMajor)
+        N, S: (B, block_num, M) (RowMajor)
     */
 
-        {M, N, K},
-        B,
-        {a_ptr, LayoutA(K)},
-        {b_ptr, LayoutB(K)},
-        {c_ptr, LayoutC(N)},
-        {d_ptr, LayoutC(N)},
-        {
-            float(1.0),
-            float(0.0)
-        },
-        {n_ptr, LayoutC(1)},
-        {soft_ptr, LayoutC(N)},
-        M*K,
-        N*K,
-        M*N,
-        M*N,
-        M*N,
-        M*N
-
-
+    {
+        static_cast<coord_t>(M),
+        static_cast<coord_t>(N),
+        static_cast<coord_t>(K)
+    },                                                                                                                                     // cutlass::gemm::GemmCoord problem_size
+    B,                                                                                                                                     // int32_t batch_count_
+    {reinterpret_cast<{{elem_input_type}}*>(a_ptr), LayoutA(K)},                                                                           // TensorRefA ref_A_
+    {reinterpret_cast<{{elem_input_type}}*>(b_ptr), LayoutB(K)},                                                                           // TensorRefB ref_B_
+    {reinterpret_cast<{{elem_output_type}}*>(workspace), LayoutC(N)},                                                                      // TensorRefC ref_C_
+    {reinterpret_cast<{{elem_output_type}}*>(workspace + B * M * N * sizeof({{elem_output_type}})), LayoutC(N)},                           // TensorRefC ref_D_
+    {
+        float(1.0),
+        float(0.0)
+    },                                                                                                                                     // typename EpilogueFunctorOp::Params linear_scaling
+    {reinterpret_cast<float*>(workspace + 2 * B * M * N * sizeof({{elem_output_type}})), LayoutC(1)},                                      // TensorRefN ref_N_
+    {reinterpret_cast<float*>(workspace + 2 * B * M * N * sizeof({{elem_output_type}}) + B * M * block_num * sizeof(float)), LayoutC(1)},  // TensorRefSum ref_S_
+    {reinterpret_cast<{{elem_output_type}}*>(soft_ptr) + output_offset, LayoutC(output_stride)},                                           // TensorRefSoft ref_Softmax_
+    M * K,                                                                                                                                 // int64_t batch_stride_A_
+    N * K,                                                                                                                                 // int64_t batch_stride_B_
+    M * N,                                                                                                                                 // int64_t batch_stride_C_
+    M * N,                                                                                                                                 // int64_t batch_stride_D_
+    M * block_num,                                                                                                                         // int64_t batch_stride_Max_
+    M * block_num,                                                                                                                         // int64_t batch_stride_Sum_
+    M * N                                                                                                                                  // int64_t batch_stride_Softmax_
 """
 )
 
 
 @registry.reg("cuda.bmm_rcr_softmax.config")
 def bmm_rcr_softmax_config(func_attrs, dtype="float16"):
-    """This function sets a callback for processing the epilogue of the kernel
-    associated with func_attrs.
-
-    Parameters
-    ----------
-    func_attrs: Dictionary
-        kernel attributes dictionary
-    layout: layout object
-        kernel layout
-    Returns
-    -------
-    None
-    """
-    common.make_fproc_f16(func_attrs, RCR)
+    common.make_fproc(func_attrs, RCR)
 
 
 @registry.reg("cuda.bmm_rcr_softmax.gen_profiler")
-def gen_profiler(func_attrs, workdir, dim_info_dict):
-    """Generate code for profiling"""
-    return bmm_common.gen_profiler(
-        func_attrs,
-        workdir,
-        dim_info_dict,
-        common_softmax.SRC_TEMPLATE,
-        PROBLEM_ARGS_TEMPLATE,
-        ARGS_PARSER_TEMPLATE,
-        emit_kernel=True,
+def gen_profiler(
+    func_attrs,
+    workdir,
+    profiler_filename,
+    dim_info_dict,
+):
+    return gemm_rcr_softmax.common_gen_profiler(
+        func_attrs=func_attrs,
+        workdir=workdir,
+        profiler_filename=profiler_filename,
+        dim_info_dict=dim_info_dict,
+        src_template=common_softmax.SRC_TEMPLATE,
+        problem_args_template=PROBLEM_ARGS_TEMPLATE,
+        args_parser_template=ARGS_PARSER_TEMPLATE,
+        ndims=3,
     )
 
 
@@ -118,26 +117,27 @@ def gen_function(
     exec_cond_template,
     dim_info_dict,
 ):
-    """Generate the code for main function"""
-    return bmm_common.gen_function(
-        func_attrs,
-        exec_cond_template,
-        dim_info_dict,
-        PROBLEM_ARGS_TEMPLATE.render(),
+    return gemm_rcr_softmax.gen_function(
+        func_attrs=func_attrs,
+        exec_cond_template=exec_cond_template,
+        dim_info_dict=dim_info_dict,
+        problem_args_template=PROBLEM_ARGS_TEMPLATE,
     )
 
 
 @registry.reg("cuda.bmm_rcr_softmax.func_decl")
 def gen_function_decl(func_attrs):
-    """Rendering argument to function declaration template"""
-    func_name = func_attrs["name"]
-    return bmm_common.FUNC_DECL_TEMPLATE.render(func_name=func_name, ndims=3)
+    return gemm_rcr_softmax.gen_function_decl(
+        func_attrs=func_attrs,
+    )
 
 
 @registry.reg("cuda.bmm_rcr_softmax.func_call")
 def gen_function_call(func_attrs, indent="  "):
-    """Rendering the code to function call template"""
-    return bmm_common.gen_function_call(func_attrs, indent)
+    return gemm_rcr_softmax.gen_function_call(
+        func_attrs=func_attrs,
+        indent=indent,
+    )
 
 
 @registry.reg("cuda.bmm_rcr_softmax.filter")

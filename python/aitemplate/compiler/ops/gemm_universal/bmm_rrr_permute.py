@@ -18,10 +18,10 @@ Batch GEMM specialization for A[RowMajor], B[RowMajor], C[RowMajor] with permuta
 
 from typing import Tuple
 
-from ...base import Tensor
-from ...tensor_accessor import TensorAccessor
-from ..common import reshape
-from . import bmm_rrr
+from aitemplate.compiler.base import Tensor
+from aitemplate.compiler.ops.common import reshape
+from aitemplate.compiler.ops.gemm_universal.bmm_xxx import bmm_rrr
+from aitemplate.compiler.tensor_accessor import TensorAccessor
 
 # pylint: disable=C0103,W0223,W0221,W0613
 
@@ -88,14 +88,14 @@ class bmm_rrr_permute(bmm_rrr):
         self._sanity_check(a, b)
         output_shape = self._infer_shapes(a, b)
 
-        output = Tensor(output_shape, src_ops={self})
+        output = Tensor(output_shape, src_ops={self}, dtype=a.dtype())
         self._attrs["outputs"] = [output]
         self._attrs["output_accessors"] = [TensorAccessor(output)]
 
         if self._attrs["layout"] == "Permute4DBMM_0213":
             b, m, n = output_shape
             d1 = self._attrs["shape"][0]
-            output_shape = [b.value() // d1, m, d1, n]
+            output_shape = [-1, m, d1, n]
             self._extract_epilogue_alignment(output_shape)
             return reshape()(output, output_shape)
         else:

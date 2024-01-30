@@ -27,11 +27,11 @@ C: [M, N]
 
 import jinja2
 
-from ... import registry
-from ...backend_spec import CUDASpec
-from ...common import gemm_common
-from ...target import Target
-from ..gemm_universal import common
+from aitemplate.backend import registry
+from aitemplate.backend.backend_spec import CUDASpec
+from aitemplate.backend.common import gemm_common
+from aitemplate.backend.cuda.gemm_universal import common
+from aitemplate.backend.target import Target
 
 # pylint: disable=C0301,W0613,W0612
 
@@ -100,21 +100,39 @@ SRC_TEMPLATE = jinja2.Template(
 #include <iostream>
 #include <type_traits>
 #include <cuda_fp16.h>
+#include <cuda_bf16.h>
 #include <cuda_runtime.h>
 #include "cutlass/util/host_tensor.h"
 
 namespace {
 
+using bfloat16 = __nv_bfloat16;
+
+__device__ float fma(float a, float b, float c) {
+  return __fmaf_rn(a, b, c);
+}
+
+__device__ half fma(half a, half b, half c) {
+  return __hfma(a, b, c);
+}
+
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 800)
+__device__ bfloat16 fma(bfloat16 a, bfloat16 b, bfloat16 c) {
+  return __hfma(a, b, c);
+}
+#endif
+
 // For each thread, read
 // A tile: 8 x K
 // B matrix: K x N
 // C tile: 8 x N
-template<int num_thread, int N, int K, bool USE_FP16_ACC>
-__global__ void gemm_rrr_small_nk_kernel_half(
-    float4* a_ptr, float4* b_ptr, float4* c_ptr, int M) {
+template<typename TElem, int num_thread, int N, int K, bool USE_FP16_ACC>
+__global__ void gemm_rrr_small_nk_kernel(
+    const float4* a_ptr, const float4* b_ptr, float4* c_ptr, int M) {
   int idx = blockIdx.x * num_thread + threadIdx.x;
+  constexpr int num_elems_in_float4 = sizeof(float4) / sizeof(TElem);
 
-  if (idx >= (M + 7) / 8) {
+  if (idx >= (M + num_elems_in_float4 - 1) / num_elems_in_float4) {
     return;
   }
 
@@ -122,20 +140,20 @@ __global__ void gemm_rrr_small_nk_kernel_half(
   a_ptr += a_idx_base;
 
   // load b matrix
-  half b[K][N];
-  half* b_half = reinterpret_cast<half*>(b_ptr);
+  TElem b[K][N];
+  auto* b_e = reinterpret_cast<const TElem*>(b_ptr);
   for (int i = 0; i < K; ++i) {
     for (int j = 0; j < N; ++j) {
-      b[i][j] = b_half[i * N + j];
+      b[i][j] = b_e[i * N + j];
     }
   }
 
   int c_idx_base = idx * N;
   c_ptr += c_idx_base;
 
-  half c_tile[8][N];
+  TElem c_tile[num_elems_in_float4][N];
 
-  if (idx <= M / 8 - 1) {
+  if (idx <= M / num_elems_in_float4 - 1) {
     // fast kernel
     // load a
     float4 a_tile_vec[K];
@@ -143,27 +161,35 @@ __global__ void gemm_rrr_small_nk_kernel_half(
     for (int i = 0; i < K; i++) {
       a_tile_vec[i] = __ldg(a_ptr++);
     }
-    half* a_tile = reinterpret_cast<half*>(&a_tile_vec);
+    auto* a_tile = reinterpret_cast<const TElem*>(&a_tile_vec);
 
     // compute
     CUTLASS_PRAGMA_UNROLL
-    for (int i = 0; i < 8; ++i) {
+    for (int i = 0; i < num_elems_in_float4; ++i) {
       CUTLASS_PRAGMA_UNROLL
       for (int j = 0; j < N; ++j) {
-        if (USE_FP16_ACC) {
-          half sum = 0;
+        if constexpr (USE_FP16_ACC) {
+          TElem sum = 0;
           CUTLASS_PRAGMA_UNROLL
           for (int k = 0; k < K; ++k) {
-            sum = __hfma(a_tile[i * K + k], b[k][j], sum);
+            sum = fma(a_tile[i * K + k], b[k][j], sum);
           }
           c_tile[i][j] = sum;
         } else {
           float sum = 0;
-          CUTLASS_PRAGMA_UNROLL
-          for (int k = 0; k < K; ++k) {
-            sum += __half2float(__hmul(a_tile[i * K + k], b[k][j]));
+          if constexpr (std::is_same_v<TElem, half>) {
+            CUTLASS_PRAGMA_UNROLL
+            for (int k = 0; k < K; ++k) {
+              sum += __half2float(__hmul(a_tile[i * K + k], b[k][j]));
+            }
+            c_tile[i][j] = __float2half_rn(sum);
+          } else {
+            CUTLASS_PRAGMA_UNROLL
+            for (int k = 0; k < K; ++k) {
+              sum += __fmul_rn(a_tile[i * K + k], b[k][j]);
+            }
+            c_tile[i][j] = sum;
           }
-          c_tile[i][j] = __float2half_rn(sum);
         }
       }
     }
@@ -177,14 +203,14 @@ __global__ void gemm_rrr_small_nk_kernel_half(
   } else {
     // process tail
     // load a
-    half* a_h = reinterpret_cast<half*>(a_ptr);
-    int m = M - M / 8 * 8;
-    half a_tile[8][K];
+    auto* a_e = reinterpret_cast<const TElem*>(a_ptr);
+    int m = M - M / num_elems_in_float4 * num_elems_in_float4;
+    TElem a_tile[num_elems_in_float4][K];
     CUTLASS_PRAGMA_UNROLL
     for (int i = 0; i < m; i++) {
       CUTLASS_PRAGMA_UNROLL
       for (int j = 0; j < K; j++) {
-        a_tile[i][j] = a_h[i * K + j];
+        a_tile[i][j] = a_e[i * K + j];
       }
     }
 
@@ -193,26 +219,35 @@ __global__ void gemm_rrr_small_nk_kernel_half(
     for (int i = 0; i < m; ++i) {
       CUTLASS_PRAGMA_UNROLL
       for (int j = 0; j < N; ++j) {
-        if (USE_FP16_ACC) {
-          half sum = 0;
+        if constexpr (USE_FP16_ACC) {
+          TElem sum = 0;
           CUTLASS_PRAGMA_UNROLL
           for (int k = 0; k < K; ++k) {
-            sum = __hfma(a_tile[i][k], b[k][j], sum);
+            sum = fma(a_tile[i][k], b[k][j], sum);
           }
           c_tile[i][j] = sum;
         } else {
           float sum = 0;
-          CUTLASS_PRAGMA_UNROLL
-          for (int k = 0; k < K; ++k) {
-            sum += __half2float(__hmul(a_tile[i][k], b[k][j]));
+          if constexpr (std::is_same_v<TElem, half>) {
+            CUTLASS_PRAGMA_UNROLL
+            for (int k = 0; k < K; ++k) {
+              sum += __half2float(__hmul(a_tile[i][k], b[k][j]));
+            }
+            c_tile[i][j] = __float2half_rn(sum);
           }
-          c_tile[i][j] = __float2half_rn(sum);
+          else {
+            CUTLASS_PRAGMA_UNROLL
+            for (int k = 0; k < K; ++k) {
+              sum += __fmul_rn(a_tile[i][k], b[k][j]);
+            }
+            c_tile[i][j] = sum;
+          }
         }
       }
     }
 
     // write c
-    half* c_h = reinterpret_cast<half*>(c_ptr);
+    auto* c_h = reinterpret_cast<TElem*>(c_ptr);
     CUTLASS_PRAGMA_UNROLL
     for (int i = 0; i < m; i++) {
       CUTLASS_PRAGMA_UNROLL
@@ -224,7 +259,8 @@ __global__ void gemm_rrr_small_nk_kernel_half(
 }
 
 // N <= 8, K <= 8
-template<typename ElemT, int N, int K>
+template<typename ElemT, int N, int K,
+         typename = std::enable_if_t<std::is_same_v<ElemT, float> || std::is_same_v<ElemT, half> || std::is_same_v<ElemT, bfloat16>, void>>
 void gemm_rrr_small_nk_launcher(ElemT* a_ptr,
                          ElemT* b_ptr,
                          ElemT* c_ptr,
@@ -236,27 +272,20 @@ void gemm_rrr_small_nk_launcher(ElemT* a_ptr,
   dim3 thread_block(nthread);
   constexpr int n_element_per_t = nthread * num_elems_in_float4;
   dim3 grid((M + n_element_per_t - 1) / n_element_per_t);
-  if constexpr (std::is_same<ElemT, half>::value) {
-    if(use_fp16_acc) {
-      gemm_rrr_small_nk_kernel_half<nthread, N, K, true><<<grid, thread_block, 0, stream>>>(
-        (float4*)a_ptr,
-        (float4*)b_ptr,
-        (float4*)c_ptr,
-        M
-      );
-    } else {
-      gemm_rrr_small_nk_kernel_half<nthread, N, K, false><<<grid, thread_block, 0, stream>>>(
-        (float4*)a_ptr,
-        (float4*)b_ptr,
-        (float4*)c_ptr,
-        M
-      );
-    }
+  if (use_fp16_acc && (std::is_same_v<ElemT, half> || std::is_same_v<ElemT, bfloat16>)) {
+    gemm_rrr_small_nk_kernel<ElemT, nthread, N, K, true><<<grid, thread_block, 0, stream>>>(
+      reinterpret_cast<const float4*>(a_ptr),
+      reinterpret_cast<const float4*>(b_ptr),
+      reinterpret_cast<float4*>(c_ptr),
+      M
+    );
   } else {
-    auto msg = std::string("Got error: unsupported elem type ") +
-      " at " + __FILE__ + ": " + std::to_string(__LINE__);
-    std::cerr << msg << std::endl;
-    throw std::runtime_error(msg);
+    gemm_rrr_small_nk_kernel<ElemT, nthread, N, K, false><<<grid, thread_block, 0, stream>>>(
+      reinterpret_cast<const float4*>(a_ptr),
+      reinterpret_cast<const float4*>(b_ptr),
+      reinterpret_cast<float4*>(c_ptr),
+      M
+    );
   }
 }
 

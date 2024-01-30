@@ -16,9 +16,9 @@
 Common functions and templates for perm021_ccr_bias_permute, which computes
 (A.permute(0, 2, 1)[col] @ B[col] + Bias).permute(0, 2, 1)
 """
-from ... import registry
+from aitemplate.backend import registry
 
-from . import (
+from aitemplate.backend.cuda.gemm_universal import (
     bmm_common,
     bmm_permute_common,
     common,
@@ -87,20 +87,13 @@ def config(func_attrs, dtype="float16"):
     def fproc(op):
         import cutlass_lib
 
-        from ...backend_spec import CUDASpec
-
-        backend_spec = CUDASpec()
-        elem_type = backend_spec.dtype_to_lib_type(
-            func_attrs["inputs"][0]._attrs["dtype"]
-        )
-
         return common.default_fproc(
             op=op,
             a_layout=cutlass_lib.library.LayoutType.ColumnMajor,
             b_layout=cutlass_lib.library.LayoutType.ColumnMajor,
             c_layout=cutlass_lib.library.LayoutType.RowMajor,
-            elem_type=elem_type,
-            epiligue_name=func_attrs["epilogue"],
+            dtype=func_attrs["inputs"][0].dtype(),
+            epilogue_name=func_attrs["epilogue"],
             permute_layout=func_attrs["layout"],
         )
 

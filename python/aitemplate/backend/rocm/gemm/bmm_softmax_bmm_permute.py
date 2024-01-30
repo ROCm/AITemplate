@@ -24,10 +24,10 @@ This is used for `ops.bmm_softmax_bmm_permute`.
 """
 import jinja2
 
-from ... import registry
-from ...common import gemm_common
-from . import bmm_common, common
-from .layout import RCR
+from aitemplate.backend import registry
+from aitemplate.backend.common import gemm_common
+from aitemplate.backend.rocm.gemm import bmm_common, common
+from aitemplate.backend.rocm.gemm.layout import RCR
 
 INPUT_ADDR_CALCULATOR = jinja2.Template(
     """
@@ -146,7 +146,7 @@ TENSOR_DECL_TEMPLATE = jinja2.Template(
   int64_t ptr_max_sz = std::max({a_ptr_sz, b_ptr_sz, c_ptr_sz});
   // TODO: special pool size for 8M L2 cache
   // need to tune it for other devices
-  int64_t mem_pool_sz = std::max(2,  std::min(64, int((1 << 23) / ptr_max_sz)));
+  int64_t mem_pool_sz = std::max(1,  std::min(64, int((1 << 23) / ptr_max_sz)));
 
   memory_pool->AllocateHalfTensor(a_ptr_sz, mem_pool_sz);  // x: index 0
   memory_pool->AllocateHalfTensor(b_ptr_sz, mem_pool_sz);  // b0: index 1

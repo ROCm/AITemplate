@@ -15,21 +15,23 @@
 """
 Layernorm codegen for ROCM.
 """
-
+from collections import OrderedDict
 from hashlib import sha1
-from typing import Any, Dict, OrderedDict
+from typing import Any, Dict
 
 import jinja2
 
-from ....compiler.base import IntImm
+from aitemplate.backend import registry
+from aitemplate.backend.rocm.normalization import norm_common
+from aitemplate.backend.target import Target
 
-from ... import registry
-from ...target import Target
-from . import norm_common
+from aitemplate.compiler.base import IntImm
 
 EXTRA_HEADERS = jinja2.Template(
     """
-#include "ck/tensor_operation/gpu/device/impl/device_normalization_impl.hpp"
+#include "ck/tensor_operation/gpu/device/impl/device_normalization_fwd_impl.hpp"
+#include "ck/tensor_operation/gpu/device/reduction_operator_mapping.hpp"
+#include "ck/tensor_operation/gpu/element/element_wise_operation.hpp"
 """
 )
 
@@ -45,7 +47,7 @@ TENSOR_DECL_TEMPLATE = jinja2.Template(
 
   // TODO: special pool size for 8M L2 cache
   // need to tune it for other devices
-  int64_t mem_pool_sz = std::max(2,  std::min(64, int((1 << 23) / ptr_sz)));
+  int64_t mem_pool_sz = std::max(1,  std::min(64, int((1 << 23) / ptr_sz)));
 
   memory_pool->AllocateHalfTensor(ptr_sz, mem_pool_sz);  // in: index 0
   memory_pool->AllocateHalfTensor(ptr_sz, mem_pool_sz);  // out: index 1
@@ -66,6 +68,9 @@ EXEC_TEMPLATE = jinja2.Template(
     """
     std::vector<ck::index_t> i_inStrides;
     std::vector<ck::index_t> i_outStrides;
+    std::vector<ck::index_t> save_mean_strides;
+    save_mean_strides.push_back(1);
+
     {% if input_strides is defined %}
     i_inStrides.push_back({{input_strides[-2]}});
     i_inStrides.push_back({{input_strides[-1]}});
@@ -89,6 +94,8 @@ EXEC_TEMPLATE = jinja2.Template(
         std::vector<ck::index_t>{0, 1},
         std::vector<ck::index_t>{0, 1},
         i_outStrides,
+        save_mean_strides,
+        save_mean_strides,
         {1},
         {{eps}},
         static_cast<ck::half_t *>(input) + {{ input_offset if input_offset is defined else 0 }},

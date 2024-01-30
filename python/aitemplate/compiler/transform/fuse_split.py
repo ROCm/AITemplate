@@ -15,15 +15,20 @@
 """
 Perform transformations on ops which support strided inputs / outputs.
 """
+import logging
 from typing import List
 
-from aitemplate.compiler.stable_set import StableSet
+from aitemplate.compiler.base import IntImm, IntVar, Operator, Tensor
 
-from ...utils import graph_utils, logger
-from ..base import IntImm, IntVar, Operator, Tensor
-from . import transform_strided_ops_utils, transform_utils
+from aitemplate.compiler.stable_set import StableSet
+from aitemplate.compiler.transform import transform_strided_ops_utils, transform_utils
+
+from aitemplate.utils import alignment, graph_utils
 
 # pylint: disable=W0612
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def _can_fuse_split_op(split_op: Operator):
@@ -133,7 +138,7 @@ def _fuse_split_and_group_gemm(  # noqa: C901
 
 
 def _is_supported_op(op_type: str):
-    from ...backend.target import Target
+    from aitemplate.backend.target import Target
 
     if Target.current().name() == "rocm":
         return op_type == "bmm_softmax_bmm_permute"
@@ -148,41 +153,40 @@ def get_stride(t: Tensor, dim: int):
     return stride
 
 
-def _check_dim_alignment(shape: List[IntVar], dim_idx: int) -> bool:
+def _check_dim_alignment(shape: List[IntVar], dim_idx: int, dtype: str) -> bool:
     k_dim = shape[dim_idx]
     # skip dynamic dim
     if not isinstance(k_dim, IntImm):
         return False
     k_dim_val = k_dim._attrs["values"][0]
     # We cannot have mis-aligned K
-    if k_dim_val % 2 == 0:
-        return True
-    else:
-        return False
+    return alignment.valid_alignment(k_dim_val, dtype)
 
 
-def _check_alignment(op: Operator, offset: int):
+def _check_alignment(op: Operator, offset: int, total_elems_from_split_dim: int):
     # ops that support align=1
     if op._attrs["op"] == "bmm_rcr_n1":
         return True
 
-    # ops that don't support align=1
-    # TODO: adjust alignment requirement based on dtype. 2-elem-alignment is
-    # only required by fp16, because async.copy needs at least 32 bits.
-    # For fp32 dtype values, 1-elem-alignment is valid.
-    if offset % 2 != 0:  # fp16
+    dtype = op._attrs["inputs"][0].dtype()
+    # ops that don't have valid alignments
+    if not alignment.valid_alignment(offset, dtype):
         return False
+    if not alignment.valid_alignment(total_elems_from_split_dim, dtype):
+        return False
+    if op._attrs["op"] == "concatenate":
+        return True
     if op._attrs["op"] == "bmm_rrr_permute":
         a_shape = op._attrs["input_accessors"][0].original_shapes
         b_shape = op._attrs["input_accessors"][1].original_shapes
         # check K and N
-        return _check_dim_alignment(a_shape, dim_idx=2) and _check_dim_alignment(
-            b_shape, dim_idx=2
-        )
+        return _check_dim_alignment(
+            a_shape, dim_idx=2, dtype=dtype
+        ) and _check_dim_alignment(b_shape, dim_idx=2, dtype=dtype)
     if op._attrs["op"] == "bmm_rcr":
         a_shape = op._attrs["input_accessors"][0].original_shapes
         # check K
-        return _check_dim_alignment(a_shape, dim_idx=2)
+        return _check_dim_alignment(a_shape, dim_idx=2, dtype=dtype)
     if op._attrs["op"] == "bmm_softmax_bmm_permute":
         # a = (B, M, K), b = (B, N, K), c = (B, N, O)
         # t = bmm_rcr(a, b)
@@ -192,13 +196,13 @@ def _check_alignment(op: Operator, offset: int):
         c_shape = op._attrs["input_accessors"][2].original_shapes
         return (
             # check K for bmm_rcr((B, M, K), (B, N, K))
-            _check_dim_alignment(a_shape, dim_idx=2)
+            _check_dim_alignment(a_shape, dim_idx=2, dtype=dtype)
             and
             # check N for bmm_rrr((B, M, N), (B, N, O))
-            _check_dim_alignment(c_shape, dim_idx=1)
+            _check_dim_alignment(c_shape, dim_idx=1, dtype=dtype)
             and
             # check O for bmm_rrr((B, M, N), (B, N, O))
-            _check_dim_alignment(c_shape, dim_idx=2)
+            _check_dim_alignment(c_shape, dim_idx=2, dtype=dtype)
         )
 
     raise RuntimeError(f'Unexpected op type: {op._attrs["op"]}')
@@ -242,12 +246,26 @@ def _fuse_split_and_strided_op(sorted_graph: List[Tensor]) -> List[Tensor]:
         # We apply padding to bmm before this fuse_split pass. However, we may
         # still have mis-aligned accesses caused by offsets. This _check_alignment
         # filters out all bad cases.
+        total_elems_from_split_dim = (
+            stride * split_input._attrs["shape"][split_dim].value()
+        )
         for output in outputs:
             can_fuse_split &= len(output.dst_ops()) > 0 and all(
-                _is_supported_op(next_op._attrs["op"])
-                # need to pass the real offset to alignment checker
-                and _check_alignment(next_op, dim_offset * stride)
-                and len(output.dst_ops()) == 1
+                (
+                    _is_supported_op(next_op._attrs["op"])
+                    # need to pass the real offset to alignment checker
+                    and _check_alignment(
+                        next_op, dim_offset * stride, total_elems_from_split_dim
+                    )
+                    and len(output.dst_ops()) == 1
+                )
+                or (
+                    next_op._attrs["op"] == "concatenate"
+                    and next_op._attrs["concat_dim"] == split_dim
+                    and _check_alignment(
+                        next_op, dim_offset * stride, total_elems_from_split_dim
+                    )
+                )
                 for next_op in output.dst_ops()
             )
             for next_op in output.dst_ops():
@@ -263,7 +281,8 @@ def _fuse_split_and_strided_op(sorted_graph: List[Tensor]) -> List[Tensor]:
 
         if not can_fuse_split:
             continue
-        logger.debug(__file__, "Remove split from graph")
+
+        _LOGGER.debug("Remove split from graph")
         split_input.dst_ops().remove(split_op)
 
         for output, offset in zip(outputs, output_offsets):
@@ -275,7 +294,6 @@ def _fuse_split_and_strided_op(sorted_graph: List[Tensor]) -> List[Tensor]:
                         )
                         # update the graph
                         next_op._attrs["inputs"][idx] = split_input
-                        break
                 split_input.dst_ops().add(next_op)
 
         # remove split op

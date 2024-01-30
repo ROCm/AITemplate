@@ -19,10 +19,11 @@ where A[RowMajor][M, K], B[RowMajor][K, N]
 """
 import jinja2
 
-from ... import registry
+from aitemplate.backend import registry
 
-from ...backend_spec import CUDASpec
-from . import common
+from aitemplate.backend.backend_spec import CUDASpec
+from aitemplate.backend.cuda.gemm_universal import common
+from aitemplate.backend.cuda.gemm_universal.layout import RRR
 
 # pylint: disable=C0103,C0415,W0613,C0301,R1705,R1703
 
@@ -43,50 +44,97 @@ ARGS_PARSER_TEMPLATE = jinja2.Template(
 """
 )
 
+
 PROBLEM_ARGS_TEMPLATE = jinja2.Template(
     """
-    cutlass::gemm::GemmUniversalMode::kGemm,
-    {M, N, K},
-    split_k,
-    {ElementComputeEpilogue(1), ElementComputeEpilogue(0)},
-    ({{elem_input_type}}*)(a_ptr),
-    ({{elem_input_type}}*)(b_ptr),
-    ({{elem_output_type}}*)(c_ptr),
-    ({{elem_output_type}}*)(c_ptr) + output_offset,
-    M * K,
-    N * K,
-    M * N,
-    M * N,
-    K,
-    N,
-    N,
-    output_stride,
+    cutlass::gemm::GemmUniversalMode::kGemm,                 // GemmUniversalMode mode
+    cutlass::gemm::GemmCoord{
+        static_cast<coord_t>(M),
+        static_cast<coord_t>(N),
+        static_cast<coord_t>(K)
+    },                                                       // GemmCoord problem_size
+    split_k,                                                 // int batch_count
+    {ElementComputeEpilogue(1), ElementComputeEpilogue(0)},  // typename EpilogueOutputOp::Params epilogue
+    ({{elem_input_type}}*)(a_ptr),                           // void const * ptr_A
+    ({{elem_input_type}}*)(b_ptr),                           // void const * ptr_B
+    ({{elem_output_type}}*)(c_ptr),                          // void const * ptr_C
+    ({{elem_output_type}}*)(c_ptr) + output_offset,          // void * ptr_D
+    M * K,                                                   // int64_t batch_stride_A
+    N * K,                                                   // int64_t batch_stride_B
+    M * N,                                                   // int64_t batch_stride_C
+    M * N,                                                   // int64_t batch_stride_D
+    K,                                                       // typename LayoutA::Stride::LongIndex lda
+    N,                                                       // typename LayoutB::Stride::LongIndex ldb
+    N,                                                       // typename LayoutC::Stride::LongIndex ldc
+    output_stride,                                           // typename LayoutC::Stride::LongIndex ldd
+"""
+)
+
+
+PROBLEM_ARGS_TEMPLATE_CUTLASS_3X = jinja2.Template(
+    """
+    cutlass::gemm::GemmUniversalMode::kGemm,                     // GemmUniversalMode mode
+    {
+        static_cast<coord_t>(M),
+        static_cast<coord_t>(N),
+        static_cast<coord_t>(K),
+        static_cast<coord_t>(1)
+    },                                                           // ProblemShape problem_shape
+    ({{elem_input_type}}*)(a_ptr),                               // ElementA const* ptr_A
+    {K, cute::Int<1>{}, cute::Int<0>{}},                         // StrideA dA
+    ({{elem_input_type}}*)(b_ptr),                               // ElementB const* ptr_B
+    {cute::Int<1>{}, N, cute::Int<0>{}},                         // StrideB dB
+    {
+        {ElementComputeEpilogue(1), ElementComputeEpilogue(0)},  // typename ThreadEpilogueOp::Params thread
+        nullptr,                                                 // ElementC const* ptr_C
+        {N, cute::Int<1>{}, cute::Int<0>{}},                     // StrideC dC
+        ({{elem_output_type}}*)(c_ptr) + output_offset,          // ElementD const* ptr_D
+        {output_stride, cute::Int<1>{}, cute::Int<0>{}},         // StrideD dD
+    },                                                           // EpilogueArguments epilogue
 """
 )
 
 
 @registry.reg("cuda.gemm_rrr.config")
 def gemm_rrr_config(func_attrs, dtype="float16"):
-    def fproc(op):
-        import cutlass_lib
+    common.make_fproc(func_attrs, RRR, include_cutlass_3x_ops=True)
 
-        from ...backend_spec import CUDASpec
+    import cutlass_lib
 
-        backend_spec = CUDASpec()
-        elem_type = backend_spec.dtype_to_lib_type(
-            func_attrs["inputs"][0]._attrs["dtype"]
-        )
+    for op in func_attrs["op_instance"].values():
+        if op.gemm_kind == cutlass_lib.library.GemmKind.Universal3x:
+            # disable residual to leave more SMEM for the mainloop
+            op.C.element = cutlass_lib.library.DataType.void
 
-        return common.default_fproc(
-            op=op,
-            a_layout=cutlass_lib.library.LayoutType.RowMajor,
-            b_layout=cutlass_lib.library.LayoutType.RowMajor,
-            c_layout=cutlass_lib.library.LayoutType.RowMajor,
-            elem_type=elem_type,
-            epiligue_name=func_attrs["epilogue"],
-        )
 
-    func_attrs["op_instance"] = common.extract_config(fproc)
+def common_gen_profiler(
+    func_attrs,
+    workdir,
+    profiler_filename,
+    dim_info_dict,
+    src_template,
+    problem_args_template,
+    problem_args_template_cutlass_3x=None,
+    bias_ptr_arg=None,
+    extra_code="",
+):
+    output_addr_calculator = common.DEFAULT_OUTPUT_ADDR_CALCULATOR.render(
+        stride_dim="*b_dim1"
+    )
+    return common.gen_profiler(
+        func_attrs=func_attrs,
+        workdir=workdir,
+        profiler_filename=profiler_filename,
+        dim_info_dict=dim_info_dict,
+        src_template=src_template,
+        problem_args_template=problem_args_template,
+        problem_args_template_cutlass_3x=problem_args_template_cutlass_3x,
+        args_parser_template=ARGS_PARSER_TEMPLATE,
+        support_split_k=True,
+        output_addr_calculator=output_addr_calculator,
+        bias_ptr_arg=bias_ptr_arg,
+        extra_code=extra_code,
+    )
 
 
 @registry.reg("cuda.gemm_rrr.gen_profiler")
@@ -95,16 +143,49 @@ def gen_profiler(func_attrs, workdir, profiler_filename, dim_info_dict):
         stride_dim="N"
     )
     return common.gen_profiler(
-        func_attrs,
-        workdir,
-        profiler_filename,
-        dim_info_dict,
-        common.SRC_TEMPLATE,
-        PROBLEM_ARGS_TEMPLATE,
-        ARGS_PARSER_TEMPLATE,
+        func_attrs=func_attrs,
+        workdir=workdir,
+        profiler_filename=profiler_filename,
+        dim_info_dict=dim_info_dict,
+        src_template=common.SRC_TEMPLATE,
+        problem_args_template=PROBLEM_ARGS_TEMPLATE,
+        problem_args_template_cutlass_3x=PROBLEM_ARGS_TEMPLATE_CUTLASS_3X,
+        args_parser_template=ARGS_PARSER_TEMPLATE,
         support_split_k=True,
         output_addr_calculator=output_addr_calculator,
     )
+
+
+def get_input_addr_calculator(func_attrs):
+    input_a_batch_stride_dim = "M * K"
+    input_a_stride_k_dim = "K"
+    input_a_offset = 0
+    input_b_batch_stride_dim = "K * N"
+    input_b_stride_k_dim = "N"
+    input_b_offset = 0
+
+    if "input_accessors" in func_attrs:
+        input_a_accessor = func_attrs["input_accessors"][0]
+        input_b_accessor = func_attrs["input_accessors"][1]
+        if input_a_accessor.is_from_strided_tensor:
+            input_a_offset = input_a_accessor.offset
+            shapes = input_a_accessor.original_shapes
+            input_a_stride_k_dim = input_a_accessor.stride(len(shapes) - 2)
+
+        if input_b_accessor.is_from_strided_tensor:
+            input_b_offset = input_b_accessor.offset
+            shapes = input_b_accessor.original_shapes
+            input_b_stride_k_dim = input_b_accessor.stride(len(shapes) - 2)
+
+    input_addr_calculator = common.INPUT_ADDR_CALCULATOR.render(
+        input_a_batch_stride_dim=input_a_batch_stride_dim,
+        input_a_stride_dim=input_a_stride_k_dim,
+        input_a_offset_val=input_a_offset,
+        input_b_batch_stride_dim=input_b_batch_stride_dim,
+        input_b_stride_dim=input_b_stride_k_dim,
+        input_b_offset_val=input_b_offset,
+    )
+    return input_addr_calculator
 
 
 @registry.reg("cuda.gemm_rrr.gen_function")
@@ -127,15 +208,20 @@ def gen_function(
         elem_input_type=elem_input_type,
         elem_output_type=elem_output_type,
     )
+    problem_args_cutlass_3x = PROBLEM_ARGS_TEMPLATE_CUTLASS_3X.render(
+        elem_input_type=elem_input_type,
+        elem_output_type=elem_output_type,
+    )
     return common.gen_function(
-        func_attrs,
-        common.SRC_TEMPLATE,
-        exec_cond_template,
-        problem_args,
-        input_ndims,
-        weight_ndims,
-        output_ndims,
-        dim_info_dict,
+        func_attrs=func_attrs,
+        src_template=common.SRC_TEMPLATE,
+        exec_cond_template=exec_cond_template,
+        problem_args=problem_args,
+        problem_args_cutlass_3x=problem_args_cutlass_3x,
+        input_ndims=input_ndims,
+        weight_ndims=weight_ndims,
+        output_ndims=output_ndims,
+        dim_info_dict=dim_info_dict,
         support_split_k=True,
         output_addr_calculator=common.OUTPUT_ADDR_CALCULATOR.render(
             stride_dim="*b_dim1", output_accessor=func_attrs["output_accessors"][0]
